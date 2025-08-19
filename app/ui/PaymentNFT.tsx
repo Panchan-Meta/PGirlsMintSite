@@ -134,6 +134,9 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   const [isSoldOut, setIsSoldOut] = useState<boolean>(!!initialSoldout);
   const [erc20FromChain, setErc20FromChain] = useState<string>("");
   const [balance, setBalance] = useState<string>("");
+  const explorerBase =
+    process.env.NEXT_PUBLIC_PGIRLSCHAIN_EXPLORER ||
+    "https://explorer.rahabpunkaholicgirls.com";
 
   const provider = useMemo(() => {
     if (typeof window === "undefined" || !window.ethereum) return null;
@@ -328,11 +331,22 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       </button>
 
       {txHash && (
-        <p style={{ marginTop: "0.5rem", fontSize: "0.85em", color: "lightgreen" }}>
+        <p
+          style={{ marginTop: "0.5rem", fontSize: "0.85em", color: "lightgreen" }}
+        >
           Tx Hash:{" "}
-          <a href={`https://etherscan.io/tx/${txHash}`} target="_blank" rel="noreferrer">
+          <a
+            href={`${explorerBase}/tx/${txHash}`}
+            target="_blank"
+            rel="noreferrer"
+          >
             {txHash}
+          </a>{" "}
+          (
+          <a href={explorerBase} target="_blank" rel="noreferrer">
+            Explorer
           </a>
+          )
         </p>
       )}
     </div>
