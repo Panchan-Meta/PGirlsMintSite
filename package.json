@@ -1,0 +1,39 @@
+{
+  "name": "pgirlsmintsite",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "bufferutil": "^4.0.9",
+    "ethers": "^6.15.0",
+    "express": "^4.21.2",
+    "next": "^13.5.11",
+    "optional": "^0.1.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "utf-8-validate": "^6.0.5"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
+    "@openzeppelin/contracts": "^5.4.0",
+    "@types/minimatch": "^6.0.0",
+    "@types/node": "24.1.0",
+    "@types/react": "19.1.8",
+    "dotenv": "^17.2.1",
+    "hardhat": "^2.26.3",
+    "typescript": "^5.2.2"
+  },
+  "description": "This project demonstrates a basic Hardhat use case. It comes with a sample contract, a test for that contract, and a Hardhat Ignition module that deploys that contract.",
+  "main": "hardhat.config.js",
+  "directories": {
+    "test": "test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
