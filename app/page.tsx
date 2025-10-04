@@ -7,24 +7,6 @@ import PaymentNFT from "./ui/PaymentNFT";
 type Item = { fileName: string; metadata: any };
 type MetaDict = Record<string, Item[]>;
 
-const getContractAddress = (metadata: unknown): string => {
-  if (!metadata || typeof metadata !== "object") {
-    return "";
-  }
-
-  const potential = [
-    (metadata as any).nftContractAddr,
-    (metadata as any).nftContractAddress,
-    (metadata as any).contractAddress,
-    (metadata as any).contract_address,
-    (metadata as any).nftContract,
-    (metadata as any).nft_address,
-    (metadata as any).contract,
-    (metadata as any).address,
-  ];
-
-  for (const candidate of potential) {
-    
       }
     }
   }
