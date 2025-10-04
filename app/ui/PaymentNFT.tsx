@@ -290,20 +290,18 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     return provider.getSigner();
   }, [provider]);
 
-  const resolveErc20Address = useCallback(async () => {
-    if (!normalizedNftAddress) {
-      return resolvedTokenAddress || fallbackTokenAddress || "";
-    }
 
     const validateCandidate = async (candidate: string | undefined | null) => {
       if (!candidate || typeof candidate !== "string") {
         return "";
       }
+
       try {
         const normalized = ethers.getAddress(candidate);
         if (!provider) {
           return normalized;
         }
+
         try {
           const code = await provider.getCode(normalized);
           if (code && code !== "0x") {
@@ -319,10 +317,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       } catch (err) {
         console.error("Invalid ERC20 candidate", candidate, err);
       }
-      return "";
-    };
 
-    if (provider && contractStatus === "ready") {
       try {
         const nftRO = new ethers.Contract(
           normalizedNftAddress,
@@ -330,39 +325,19 @@ export default function PaymentNFT(props: PaymentNFTProps) {
           provider
         );
         const onChain = await nftRO.pgirlsToken().catch(() => "");
-        const validatedOnChain = await validateCandidate(onChain);
-        if (validatedOnChain) {
-          if (validatedOnChain !== resolvedTokenAddress) {
-            setResolvedTokenAddress(validatedOnChain);
-          }
-          return validatedOnChain;
+
         }
       } catch (err) {
         console.error("Failed to resolve ERC20 via NFT", err);
       }
     }
 
-    const validatedFallback = await validateCandidate(fallbackTokenAddress);
-    if (validatedFallback) {
-      if (validatedFallback !== resolvedTokenAddress) {
-        setResolvedTokenAddress(validatedFallback);
-      }
-      return validatedFallback;
-    }
-
-    return resolvedTokenAddress || "";
-  }, [
-    normalizedNftAddress,
-    provider,
-    contractStatus,
-    resolvedTokenAddress,
-    fallbackTokenAddress,
   ]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const detected = await resolveErc20Address();
+
       if (!cancelled && detected && detected !== resolvedTokenAddress) {
         setResolvedTokenAddress(detected);
       }
@@ -370,46 +345,6 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     return () => {
       cancelled = true;
     };
-  }, [resolveErc20Address, resolvedTokenAddress]);
-
-  const resolveErc20Address = useCallback(async () => {
-    if (!normalizedNftAddress) return "";
-
-    const candidates: string[] = [];
-    if (erc20FromChain) {
-      candidates.push(erc20FromChain);
-    }
-    if (erc20Address) {
-      candidates.push(erc20Address);
-    }
-
-    for (const candidate of candidates) {
-      if (!candidate) continue;
-      try {
-        return ethers.getAddress(candidate);
-      } catch (err) {
-        console.error("Invalid ERC20 candidate", candidate, err);
-      }
-    }
-
-    if (!provider) return "";
-
-    try {
-      const nftRO = new ethers.Contract(
-        normalizedNftAddress,
-        NFT_ABI_MIN,
-        provider
-      );
-      const onChain = await nftRO.pgirlsToken().catch(() => "");
-      if (onChain && onChain !== ethers.ZeroAddress) {
-        return ethers.getAddress(onChain);
-      }
-    } catch (err) {
-      console.error("Failed to resolve ERC20 via NFT", err);
-    }
-
-    return "";
-  }, [normalizedNftAddress, provider, erc20FromChain, erc20Address]);
 
   /** ---------- On-chain + Off-chain soldout check ---------- */
   const checkSoldOut = useCallback(async () => {
@@ -474,7 +409,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   useEffect(() => {
     (async () => {
       try {
-        const tokenAddr = await resolveErc20Address();
+
         if (!provider || !account || !tokenAddr) return;
         const erc20r = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, provider);
         let decimals = 18;
@@ -489,7 +424,6 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         console.error(balanceErr);
       }
     })();
-  }, [provider, account, resolveErc20Address]);
 
   useEffect(() => {
     if (!account) {
@@ -527,7 +461,6 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       const signer = await getSigner();
       if (!signer) throw new Error("No signer");
 
-      const tokenAddr = await resolveErc20Address();
       if (!tokenAddr) throw new Error("Missing PGirls token address");
 
       const erc20 = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, signer);
@@ -670,7 +603,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     checkSoldOut,
     getOwnerFromMetadata,
     contractStatus,
-    resolveErc20Address,
+
   ]);
 
   const handlePriceChange = useCallback(
