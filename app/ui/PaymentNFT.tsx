@@ -163,7 +163,7 @@ function getFriendlyErrorMessage(error: any): string {
   );
 
   if (matchesInsufficient || error?.code === "INSUFFICIENT_FUNDS") {
-    return "PGirlsトークンの残高が不足しています (残高不足エラー)。";
+    return "Insufficient PGirls token balance (insufficient funds error).";
   }
 
   return raw;
@@ -402,10 +402,10 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       setTxHash(null);
       if (!provider) throw new Error("No provider");
       if (!normalizedNftAddress) {
-        throw new Error("NFTコントラクトアドレスが設定されていません。");
+        throw new Error("NFT contract address is not set.");
       }
       if (contractStatus !== "ready") {
-        throw new Error("NFTコントラクトのデプロイが確認できません。");
+        throw new Error("NFT contract deployment could not be confirmed.");
       }
       const signer = await getSigner();
       if (!signer) throw new Error("No signer");
@@ -434,7 +434,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       if (balanceRaw < parsedPrice) {
         const requiredAmount = ethers.formatUnits(parsedPrice, decimals);
         throw new Error(
-          `PGirlsトークンの残高が不足しています。必要額: ${requiredAmount}`
+          `Insufficient PGirls token balance. Required amount: ${requiredAmount}`
         );
       }
 
@@ -561,11 +561,11 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   const disableListingButton = useMemo(() => {
     if (updatingListing || !canList) return true;
     const trimmed = listPriceInput.trim();
-    if (mintStatus === LISTED_STATUS) {
-      return trimmed === (activePrice || "");
+    if (mintStatus !== LISTED_STATUS) {
+      return trimmed.length === 0;
     }
-    return trimmed.length === 0;
-  }, [updatingListing, canList, listPriceInput, mintStatus, activePrice]);
+    return false;
+  }, [updatingListing, canList, listPriceInput, mintStatus]);
 
   const handleListingUpdate = useCallback(async () => {
     if (!canList) {
@@ -708,17 +708,18 @@ export default function PaymentNFT(props: PaymentNFTProps) {
 
       {!normalizedNftAddress && (
         <p style={{ fontSize: "0.8rem", color: "#ff8080" }}>
-          メタデータにNFTコントラクトアドレスが含まれていません。
+          The metadata does not include an NFT contract address.
         </p>
       )}
       {normalizedNftAddress && provider && contractStatus === "checking" && (
         <p style={{ fontSize: "0.8rem", color: "#8ecbff" }}>
-          NFTコントラクトを確認しています...
+          Checking NFT contract...
         </p>
       )}
       {normalizedNftAddress && provider && contractStatus === "missing" && (
         <p style={{ fontSize: "0.8rem", color: "#ff8080" }}>
-          指定されたNFTコントラクトを検出できませんでした。ネットワークとアドレスを確認してください。
+          Could not detect the specified NFT contract. Please check the network
+          and address.
         </p>
       )}
 
