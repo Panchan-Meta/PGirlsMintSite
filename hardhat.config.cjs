@@ -2,7 +2,13 @@ require("dotenv").config();
 require("@nomicfoundation/hardhat-toolbox"); // これだけでOK
 
 const PGIRLSCHAIN_RPC_URL = process.env.PGIRLSCHAIN_RPC_URL || "http://127.0.0.1:8545";
-const PRIVATE_KEY = process.env.PGIRLSCHAIN_PRIVATE_KEY;
+const PRIVATE_KEY = process.env.PRIVATE_KEY || process.env.PGIRLSCHAIN_PRIVATE_KEY;
+
+if (!PRIVATE_KEY) {
+  console.warn(
+    "[hardhat] No PRIVATE_KEY found in the environment. Please set PRIVATE_KEY or PGIRLSCHAIN_PRIVATE_KEY to deploy."
+  );
+}
 
 module.exports = {
   defaultNetwork: "pgirls",
