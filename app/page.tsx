@@ -7,6 +7,35 @@ import PaymentNFT from "./ui/PaymentNFT";
 type Item = { fileName: string; metadata: any };
 type MetaDict = Record<string, Item[]>;
 
+const getContractAddress = (metadata: unknown): string => {
+  if (!metadata || typeof metadata !== "object") {
+    return "";
+  }
+
+  const potential = [
+    (metadata as any).nftContractAddr,
+    (metadata as any).nftContractAddress,
+    (metadata as any).contractAddress,
+    (metadata as any).contract_address,
+    (metadata as any).nftContract,
+    (metadata as any).nft_address,
+    (metadata as any).contract,
+    (metadata as any).address,
+  ];
+
+  for (const candidate of potential) {
+    if (typeof candidate === "string") {
+      const trimmed = candidate.trim();
+      if (trimmed.length === 0) continue;
+      if (ethers.isAddress(trimmed)) {
+        return ethers.getAddress(trimmed);
+      }
+    }
+  }
+
+  return "";
+};
+
 export default function RahabMintSite() {
   const [categories, setCategories] = useState<string[]>([]);
   const [nfts, setNfts] = useState<MetaDict>({});
@@ -302,32 +331,36 @@ export default function RahabMintSite() {
             >
               {cat}
             </h2>
-            {nfts[cat]?.map(({ fileName, metadata }, i) => (
-              <div key={`${cat}-${fileName}`} style={{ marginBottom: "2rem" }}>
-                <PaymentNFT
-                  nftContractAddr={"0x704Bf56A89c745e6A62C70803816E83b009d2211"}
-                  erc20Address={"0x654f25F2a36997C397Aad8a66D5a8783b6E61b9b"}
-                  tokenId={BigInt((starts[cat] ?? 1) + i)}
-                  mediaUrl={metadata.image || metadata.animation_url}
-                  price={(metadata.price ?? "")
-                    .toString()
-                    .replace(/[^\d.]/g, "")}
-                  category={cat}
-                  fileName={fileName}
-                  langStr="en-US"
-                  initialSoldout={Boolean(metadata.soldout)}
-                  initialMintStatus={(metadata.mintStatus ?? "BeforeList") as string}
-                  ownerAddress={
-                    (metadata.ownerAddress ||
-                      metadata.owner ||
-                      metadata.walletAddress ||
-                      "") as string
-                  }
-                  provider={provider}
-                  account={account}
-                />
-              </div>
-            ))}
+            {nfts[cat]?.map(({ fileName, metadata }, i) => {
+              const contractAddress = getContractAddress(metadata);
+
+              return (
+                <div key={`${cat}-${fileName}`} style={{ marginBottom: "2rem" }}>
+                  <PaymentNFT
+                    nftContractAddr={contractAddress}
+                    erc20Address={"0x654f25F2a36997C397Aad8a66D5a8783b6E61b9b"}
+                    tokenId={BigInt((starts[cat] ?? 1) + i)}
+                    mediaUrl={metadata.image || metadata.animation_url}
+                    price={(metadata.price ?? "")
+                      .toString()
+                      .replace(/[^\d.]/g, "")}
+                    category={cat}
+                    fileName={fileName}
+                    langStr="en-US"
+                    initialSoldout={Boolean(metadata.soldout)}
+                    initialMintStatus={(metadata.mintStatus ?? "BeforeList") as string}
+                    ownerAddress={
+                      (metadata.ownerAddress ||
+                        metadata.owner ||
+                        metadata.walletAddress ||
+                        "") as string
+                    }
+                    provider={provider}
+                    account={account}
+                  />
+                </div>
+              );
+            })}
           </div>
         ))}
       </section>

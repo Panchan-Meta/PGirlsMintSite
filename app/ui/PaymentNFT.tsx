@@ -122,6 +122,55 @@ const ERC20_ABI_MIN = [
   "function approve(address spender, uint256 amount) returns (bool)",
 ] as const;
 
+const INSUFFICIENT_BALANCE_PATTERNS = [
+  "insufficient balance",
+  "insufficient funds",
+  "transfer amount exceeds balance",
+  "exceeds balance",
+  "balance too low",
+];
+
+function extractErrorMessage(error: any): string | undefined {
+  if (!error) return undefined;
+  if (typeof error === "string") return error;
+
+  const candidates = [
+    error?.reason,
+    error?.shortMessage,
+    error?.data?.message,
+    error?.error?.message,
+    error?.error?.data?.message,
+    error?.message,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+function getFriendlyErrorMessage(error: any): string {
+  const raw = extractErrorMessage(error);
+  if (!raw) return "Mint failed";
+
+  const normalized = raw.toLowerCase();
+  if (normalized.includes("could not decode result data")) {
+    return "NFTコントラクトの呼び出しに失敗しました。コントラクトアドレスとデプロイ状況を確認してください。";
+  }
+  const matchesInsufficient = INSUFFICIENT_BALANCE_PATTERNS.some((pattern) =>
+    normalized.includes(pattern)
+  );
+
+  if (matchesInsufficient || error?.code === "INSUFFICIENT_FUNDS") {
+    return "PGirlsトークンの残高が不足しています (残高不足エラー)。";
+  }
+
+  return raw;
+}
+
 export default function PaymentNFT(props: PaymentNFTProps) {
   const {
     nftContractAddr,
@@ -153,6 +202,21 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   const [activePrice, setActivePrice] = useState<string>(price);
   const [listPriceInput, setListPriceInput] = useState<string>(price);
   const [updatingListing, setUpdatingListing] = useState<boolean>(false);
+  const [contractStatus, setContractStatus] = useState<
+    "unknown" | "checking" | "ready" | "missing"
+  >("unknown");
+
+  const normalizedNftAddress = useMemo(() => {
+    if (!nftContractAddr || typeof nftContractAddr !== "string") {
+      return "";
+    }
+    try {
+      return ethers.getAddress(nftContractAddr);
+    } catch (err) {
+      console.error("Invalid NFT contract address", err);
+      return "";
+    }
+  }, [nftContractAddr]);
 
   useEffect(() => {
     setCurrentOwnerAddress(ownerAddress?.trim() ?? "");
@@ -171,6 +235,42 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     process.env.NEXT_PUBLIC_PGIRLSCHAIN_EXPLORER ||
     "https://explorer.rahabpunkaholicgirls.com";
 
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        if (!provider || !normalizedNftAddress) {
+          if (!cancelled) {
+            setContractStatus("missing");
+          }
+          return;
+        }
+
+        if (!cancelled) {
+          setContractStatus("checking");
+        }
+
+        const code = await provider.getCode(normalizedNftAddress);
+        if (cancelled) return;
+        if (code && code !== "0x") {
+          setContractStatus("ready");
+        } else {
+          setContractStatus("missing");
+        }
+      } catch (err) {
+        console.error(err);
+        if (!cancelled) {
+          setContractStatus("missing");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [provider, normalizedNftAddress]);
+
   const getSigner = useCallback(async () => {
     if (!provider) return null;
     return provider.getSigner();
@@ -180,8 +280,12 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   useEffect(() => {
     (async () => {
       try {
-        if (!provider || !nftContractAddr) return;
-        const nftRO = new ethers.Contract(nftContractAddr, NFT_ABI_MIN, provider);
+        if (!provider || !normalizedNftAddress || contractStatus !== "ready") return;
+        const nftRO = new ethers.Contract(
+          normalizedNftAddress,
+          NFT_ABI_MIN,
+          provider
+        );
         const addr = await nftRO.pgirlsToken().catch(() => "");
         if (addr && typeof addr === "string" && addr !== ethers.ZeroAddress) {
           setErc20FromChain(addr);
@@ -190,7 +294,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         console.error(err);
       }
     })();
-  }, [provider, nftContractAddr]);
+  }, [provider, normalizedNftAddress, contractStatus]);
 
   /** ---------- On-chain + Off-chain soldout check ---------- */
   const checkSoldOut = useCallback(async () => {
@@ -204,8 +308,18 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         setIsSoldOut(true);
         return;
       }
-      if (!provider || !nftContractAddr || !tokenId) return;
-      const nftRO = new ethers.Contract(nftContractAddr, NFT_ABI_MIN, provider);
+      if (
+        !provider ||
+        !normalizedNftAddress ||
+        !tokenId ||
+        contractStatus !== "ready"
+      )
+        return;
+      const nftRO = new ethers.Contract(
+        normalizedNftAddress,
+        NFT_ABI_MIN,
+        provider
+      );
 
       let sold = false;
       try {
@@ -230,10 +344,11 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     }
   }, [
     provider,
-    nftContractAddr,
+    normalizedNftAddress,
     tokenId,
     initialSoldout,
     mintStatus,
+    contractStatus,
   ]);
 
   useEffect(() => {
@@ -275,12 +390,25 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   }, []);
 
   /** ---------- Mint ---------- */
+  const isOwner = useMemo(() => {
+    if (!account || !currentOwnerAddress) return false;
+    return (
+      account.trim().toLowerCase() === currentOwnerAddress.trim().toLowerCase()
+    );
+  }, [account, currentOwnerAddress]);
+
   const handleMint = useCallback(async () => {
-    if (minting || isSoldOut || mintStatus !== LISTED_STATUS) return;
+    if (minting || isSoldOut || mintStatus !== LISTED_STATUS || isOwner) return;
     try {
       setMinting(true);
       setTxHash(null);
       if (!provider) throw new Error("No provider");
+      if (!normalizedNftAddress) {
+        throw new Error("NFTコントラクトアドレスが設定されていません。");
+      }
+      if (contractStatus !== "ready") {
+        throw new Error("NFTコントラクトのデプロイが確認できません。");
+      }
       const signer = await getSigner();
       if (!signer) throw new Error("No signer");
 
@@ -304,13 +432,20 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       const ownerAddr = await signer.getAddress();
       const normalizedOwnerAddr = ownerAddr.trim();
 
-      const allowance: bigint = await erc20.allowance(ownerAddr, nftContractAddr);
+      const allowance: bigint = await erc20.allowance(
+        ownerAddr,
+        normalizedNftAddress
+      );
       if (allowance < parsedPrice) {
-        const txApprove = await erc20.approve(nftContractAddr, parsedPrice);
+        const txApprove = await erc20.approve(normalizedNftAddress, parsedPrice);
         await txApprove.wait();
       }
 
-      const nft = new ethers.Contract(nftContractAddr, NFT_ABI_WRITE, signer);
+      const nft = new ethers.Contract(
+        normalizedNftAddress,
+        NFT_ABI_WRITE,
+        signer
+      );
 
       // 既存パターン: /metadata/<lang>/<paddedId>.json
       const paddedTokenId = tokenId.toString().padStart(3, "0");
@@ -373,18 +508,19 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       await checkSoldOut();
     } catch (e: any) {
       console.error(e);
-      alert(e?.reason || e?.message || "Mint failed");
+      alert(getFriendlyErrorMessage(e));
     } finally {
       setMinting(false);
     }
   }, [
     minting,
     isSoldOut,
+    isOwner,
     provider,
     getSigner,
     erc20Address,
     erc20FromChain,
-    nftContractAddr,
+    normalizedNftAddress,
     activePrice,
     langStr,
     tokenId,
@@ -393,6 +529,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     mintStatus,
     checkSoldOut,
     getOwnerFromMetadata,
+    contractStatus,
   ]);
 
   const handlePriceChange = useCallback(
@@ -408,13 +545,6 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     },
     [mintStatus]
   );
-
-  const isOwner = useMemo(() => {
-    if (!account || !currentOwnerAddress) return false;
-    return (
-      account.trim().toLowerCase() === currentOwnerAddress.trim().toLowerCase()
-    );
-  }, [account, currentOwnerAddress]);
 
   const canList = useMemo(() => {
     if (!isOwner) return false;
@@ -503,11 +633,25 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     if (minting) return "Processing...";
     if (!provider) return "Wallet Not Found";
     if (!account) return "Connect Wallet";
+    if (!normalizedNftAddress) return "Contract Missing";
+    if (contractStatus === "checking") return "Checking Contract";
+    if (contractStatus === "missing") return "Contract Unavailable";
     if (isSoldOut) return "Sold Out";
     if (mintStatus !== LISTED_STATUS) return "Not Listed";
     if (!activePrice) return "No Price";
+    if (isOwner) return "Owner Wallet";
     return "Mint";
-  }, [minting, provider, account, isSoldOut, mintStatus, activePrice]);
+  }, [
+    minting,
+    provider,
+    account,
+    normalizedNftAddress,
+    contractStatus,
+    isSoldOut,
+    mintStatus,
+    activePrice,
+    isOwner,
+  ]);
 
   const isDisabled = useMemo(
     () =>
@@ -516,8 +660,21 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       !account ||
       mintStatus !== LISTED_STATUS ||
       !activePrice ||
+      isSoldOut ||
+      isOwner ||
+      !normalizedNftAddress ||
+      contractStatus !== "ready",
+    [
+      minting,
+      provider,
+      account,
+      mintStatus,
+      activePrice,
       isSoldOut,
-    [minting, provider, account, mintStatus, activePrice, isSoldOut]
+      isOwner,
+      normalizedNftAddress,
+      contractStatus,
+    ]
   );
 
   return (
@@ -540,6 +697,22 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       ) : (
         <p style={{ fontSize: "0.8rem", color: "#888" }}>
           Connect the owner wallet to manage the listing.
+        </p>
+      )}
+
+      {!normalizedNftAddress && (
+        <p style={{ fontSize: "0.8rem", color: "#ff8080" }}>
+          メタデータにNFTコントラクトアドレスが含まれていません。
+        </p>
+      )}
+      {normalizedNftAddress && provider && contractStatus === "checking" && (
+        <p style={{ fontSize: "0.8rem", color: "#8ecbff" }}>
+          NFTコントラクトを確認しています...
+        </p>
+      )}
+      {normalizedNftAddress && provider && contractStatus === "missing" && (
+        <p style={{ fontSize: "0.8rem", color: "#ff8080" }}>
+          指定されたNFTコントラクトを検出できませんでした。ネットワークとアドレスを確認してください。
         </p>
       )}
 
