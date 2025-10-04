@@ -290,8 +290,10 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     return provider.getSigner();
   }, [provider]);
 
+  const [tokenAddr, setTokenAddr] = useState<string>("");
 
-    const validateCandidate = async (candidate: string | undefined | null) => {
+  const validateCandidate = useCallback(
+    async (candidate: string | undefined | null) => {
       if (!candidate || typeof candidate !== "string") {
         return "";
       }
@@ -318,33 +320,71 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         console.error("Invalid ERC20 candidate", candidate, err);
       }
 
+      return "";
+    },
+    [provider]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const resolved = await validateCandidate(resolvedTokenAddress);
+      if (!cancelled && resolved) {
+        setTokenAddr(resolved);
+        return;
+      }
+
+      const fallback = await validateCandidate(fallbackTokenAddress);
+      if (!cancelled && fallback) {
+        if (fallback !== resolvedTokenAddress) {
+          setResolvedTokenAddress(fallback);
+        }
+        setTokenAddr(fallback);
+        return;
+      }
+
+      if (!provider || !normalizedNftAddress) {
+        if (!cancelled) {
+          setTokenAddr("");
+        }
+        return;
+      }
+
       try {
         const nftRO = new ethers.Contract(
           normalizedNftAddress,
           NFT_ABI_MIN,
           provider
         );
-        const onChain = await nftRO.pgirlsToken().catch(() => "");
-
+        const onChainRaw = await nftRO.pgirlsToken().catch(() => "");
+        const onChain = await validateCandidate(onChainRaw);
+        if (!cancelled && onChain) {
+          if (onChain !== resolvedTokenAddress) {
+            setResolvedTokenAddress(onChain);
+          }
+          setTokenAddr(onChain);
+          return;
         }
       } catch (err) {
         console.error("Failed to resolve ERC20 via NFT", err);
       }
-    }
 
-  ]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-
-      if (!cancelled && detected && detected !== resolvedTokenAddress) {
-        setResolvedTokenAddress(detected);
+      if (!cancelled) {
+        setTokenAddr("");
       }
     })();
+
     return () => {
       cancelled = true;
     };
+  }, [
+    validateCandidate,
+    resolvedTokenAddress,
+    fallbackTokenAddress,
+    provider,
+    normalizedNftAddress,
+  ]);
 
   /** ---------- On-chain + Off-chain soldout check ---------- */
   const checkSoldOut = useCallback(async () => {
@@ -424,6 +464,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         console.error(balanceErr);
       }
     })();
+  }, [provider, account, tokenAddr]);
 
   useEffect(() => {
     if (!account) {
