@@ -430,6 +430,14 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       const ownerAddr = await signer.getAddress();
       const normalizedOwnerAddr = ownerAddr.trim();
 
+      const balanceRaw: bigint = await erc20.balanceOf(ownerAddr);
+      if (balanceRaw < parsedPrice) {
+        const requiredAmount = ethers.formatUnits(parsedPrice, decimals);
+        throw new Error(
+          `PGirlsトークンの残高が不足しています。必要額: ${requiredAmount}`
+        );
+      }
+
       const allowance: bigint = await erc20.allowance(
         ownerAddr,
         normalizedNftAddress
