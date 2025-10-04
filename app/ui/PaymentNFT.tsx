@@ -254,9 +254,16 @@ export default function PaymentNFT(props: PaymentNFTProps) {
 
     (async () => {
       try {
-        if (!provider || !normalizedNftAddress) {
+        if (!normalizedNftAddress) {
           if (!cancelled) {
             setContractStatus("missing");
+          }
+          return;
+        }
+
+        if (!provider) {
+          if (!cancelled) {
+            setContractStatus("unknown");
           }
           return;
         }
