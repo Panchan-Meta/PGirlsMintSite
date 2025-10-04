@@ -1,38 +1,31 @@
 const fs = require("fs");
 const path = require("path");
-const { Wallet } = require("ethers");
 
 const ASSETS_DIR = path.join(__dirname, "../public/assets");
 const OUTPUT_DIR = path.join(__dirname, "../metadata");
 const BASE_URL = "https://mint.rahabpunkaholicgirls.com/assets";
-const OWNER_PRIVATE_KEY = (
-  process.env.OWNER_PRIVATE_KEY || process.env.METADATA_OWNER_PRIVATE_KEY || ""
-)
+const TREASURY_ADDRESS = (process.env.TREASURY_ADDRESS || "")
   .trim()
   .replace(/^['"]+|['"]+$/g, "");
 
-function resolveOwnerAddressFromPrivateKey() {
-  if (!OWNER_PRIVATE_KEY) {
-    return "";
+function validateTreasuryAddress(address) {
+  if (!address) {
+    return false;
   }
 
-  try {
-    const normalizedKey = OWNER_PRIVATE_KEY.startsWith("0x")
-      ? OWNER_PRIVATE_KEY
-      : `0x${OWNER_PRIVATE_KEY}`;
-    const wallet = new Wallet(normalizedKey);
-    return wallet.address;
-  } catch (err) {
-    console.warn("[metadata] Failed to derive owner address from private key:", err);
-    return "";
+  const normalized = address.startsWith("0x") ? address : `0x${address}`;
+  if (!/^0x[a-fA-F0-9]{40}$/.test(normalized)) {
+    return false;
   }
+
+  return normalized;
 }
 
-const DEFAULT_OWNER_ADDRESS = resolveOwnerAddressFromPrivateKey();
+const DEFAULT_OWNER_ADDRESS = validateTreasuryAddress(TREASURY_ADDRESS);
 
 if (!DEFAULT_OWNER_ADDRESS) {
   console.error(
-    "[metadata] OWNER_PRIVATE_KEY (or METADATA_OWNER_PRIVATE_KEY) is missing or invalid. Unable to derive owner address."
+    "[metadata] TREASURY_ADDRESS is missing or invalid. Unable to set owner address."
   );
   process.exit(1);
 }
