@@ -15,6 +15,8 @@ interface PaymentNFTProps {
   fileName: string;
   /** メタデータ由来の初期 soldout（オフチェーンフォールバック） */
   initialSoldout?: boolean;
+  initialMintStatus?: string;
+  ownerAddress?: string;
 }
 
 declare global {
@@ -126,6 +128,8 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     category,
     fileName,
     initialSoldout,
+    initialMintStatus,
+    ownerAddress,
   } = props;
 
   const [account, setAccount] = useState<string>("");
@@ -134,6 +138,21 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   const [isSoldOut, setIsSoldOut] = useState<boolean>(!!initialSoldout);
   const [erc20FromChain, setErc20FromChain] = useState<string>("");
   const [balance, setBalance] = useState<string>("");
+  const [mintStatus, setMintStatus] = useState<string>(
+    initialMintStatus || "BeforeList"
+  );
+  const [activePrice, setActivePrice] = useState<string>(price);
+  const [listPriceInput, setListPriceInput] = useState<string>(price);
+  const [updatingListing, setUpdatingListing] = useState<boolean>(false);
+
+  useEffect(() => {
+    setMintStatus(initialMintStatus || "BeforeList");
+  }, [initialMintStatus]);
+
+  useEffect(() => {
+    setActivePrice(price);
+    setListPriceInput(price);
+  }, [price]);
   const explorerBase =
     process.env.NEXT_PUBLIC_PGIRLSCHAIN_EXPLORER ||
     "https://explorer.rahabpunkaholicgirls.com";
@@ -223,7 +242,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
 
   /** ---------- Mint ---------- */
   const handleMint = useCallback(async () => {
-    if (minting || isSoldOut) return;
+    if (minting || isSoldOut || mintStatus !== "Listed") return;
     try {
       setMinting(true);
       setTxHash(null);
@@ -240,7 +259,12 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         decimals = Number(await erc20.decimals());
       } catch {}
 
-      const parsedPrice = ethers.parseUnits((price ?? "0").toString(), decimals);
+      const priceValue = (activePrice || "").trim();
+      if (!priceValue) {
+        throw new Error("Listing price is missing");
+      }
+
+      const parsedPrice = ethers.parseUnits(priceValue, decimals);
       const ownerAddr = await signer.getAddress();
 
       const allowance: bigint = await erc20.allowance(ownerAddr, nftContractAddr);
@@ -275,12 +299,27 @@ export default function PaymentNFT(props: PaymentNFTProps) {
 
       // ---- メタデータ側にも soldout を反映（フォールバック） ----
       try {
-        await fetch(`/api/markSoldOut`, {
+        const response = await fetch(`/api/updateListing`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ category, fileName }),
+          body: JSON.stringify({
+            category,
+            fileName,
+            mintStatus: "BeforeList",
+            price: "",
+          }),
         });
-      } catch {}
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          throw new Error(body.error || "Failed to reset listing");
+        }
+      } catch (err) {
+        console.error(err);
+      }
+
+      setMintStatus("BeforeList");
+      setActivePrice("");
+      setListPriceInput("");
     } catch (e: any) {
       console.error(e);
       alert(e?.reason || e?.message || "Mint failed");
@@ -295,24 +334,158 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     erc20Address,
     erc20FromChain,
     nftContractAddr,
-    price,
+    activePrice,
     langStr,
     tokenId,
     checkSoldOut,
     category,
     fileName,
+    mintStatus,
   ]);
 
-  const isDisabled = minting || isSoldOut;
+  const isDisabled =
+    minting || isSoldOut || mintStatus !== "Listed" || !activePrice?.trim();
+
+  const displayButtonLabel = isSoldOut
+    ? "Sold out"
+    : minting
+    ? "Processing..."
+    : mintStatus === "Listed"
+    ? "Mint with PGirls"
+    : "Not Listed";
+
+  const trimmedListPrice = (listPriceInput || "").trim();
+  const disableListingButton =
+    updatingListing ||
+    !trimmedListPrice ||
+    (mintStatus === "Listed" && trimmedListPrice === (activePrice || "").trim());
+
+  const handleListingUpdate = useCallback(async () => {
+    if (updatingListing || isSoldOut) return;
+    const sanitized = (listPriceInput || "").trim();
+    if (!sanitized) {
+      alert("Please input price before listing.");
+      return;
+    }
+    if (
+      mintStatus === "Listed" &&
+      sanitized === (activePrice || "").trim()
+    ) {
+      alert("Price is unchanged.");
+      return;
+    }
+    try {
+      setUpdatingListing(true);
+      const response = await fetch(`/api/updateListing`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category,
+          fileName,
+          mintStatus: "Listed",
+          price: sanitized,
+        }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || "Failed to update listing");
+      }
+      const body = await response.json().catch(() => ({}));
+      const updated = body?.metadata ?? {};
+      setMintStatus((updated.mintStatus as string) || "Listed");
+      const newPrice = (updated.price as string) || sanitized;
+      setActivePrice(newPrice);
+      setListPriceInput(newPrice);
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || "Failed to update listing");
+    } finally {
+      setUpdatingListing(false);
+    }
+  }, [
+    updatingListing,
+    isSoldOut,
+    listPriceInput,
+    category,
+    fileName,
+  ]);
+
+  const handlePriceChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = e.target.value;
+      const sanitized = value
+        .replace(/[^\d.]/g, "")
+        .replace(/(\..*)\./g, "$1");
+      setListPriceInput(sanitized);
+      if (mintStatus !== "Listed") {
+        setActivePrice(sanitized);
+      }
+    },
+    [mintStatus]
+  );
 
   return (
     <div style={{ textAlign: "center" }}>
       <AutoMedia providedUrl={mediaUrl} category={category} fileName={fileName} />
 
-      <p style={{ fontSize: "0.9rem", color: "#ccc" }}>Price: {price} PGirls</p>
+      <p style={{ fontSize: "0.9rem", color: "#ccc" }}>
+        Price: {activePrice ? `${activePrice} PGirls` : "-"}
+      </p>
       <p style={{ fontSize: "0.85rem", color: "#aaa" }}>
         Your PGirls balance (on-chain): {balance || "-"}
       </p>
+
+      {ownerAddress && (
+        <p style={{ fontSize: "0.85rem", color: "#aaa" }}>
+          Owner Address:{" "}
+          <span style={{ fontFamily: "monospace" }}>{ownerAddress}</span>
+        </p>
+      )}
+
+      {!isSoldOut && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.5rem",
+            alignItems: "center",
+            marginTop: "0.75rem",
+          }}
+        >
+          <input
+            type="text"
+            inputMode="decimal"
+            value={listPriceInput}
+            onChange={handlePriceChange}
+            placeholder="Enter price in PGirls"
+            style={{
+              padding: "0.5rem",
+              borderRadius: "6px",
+              border: "1px solid #444",
+              background: "#111",
+              color: "#fff",
+              width: "200px",
+              textAlign: "center",
+            }}
+          />
+          <button
+            onClick={handleListingUpdate}
+            disabled={disableListingButton}
+            style={{
+              padding: "0.5rem 1rem",
+              backgroundColor:
+                disableListingButton ? "#444" : "#28a745",
+              color: "white",
+              border: "none",
+              borderRadius: "6px",
+              cursor:
+                disableListingButton ? "not-allowed" : "pointer",
+            }}
+          >
+            {mintStatus === "Listed" ? "Update Listing" : "List for Sale"}
+          </button>
+        </div>
+      )}
 
       <button
         onClick={handleMint}
@@ -327,7 +500,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
           cursor: isDisabled ? "not-allowed" : "pointer",
         }}
       >
-        {isSoldOut ? "Sold out" : minting ? "Processing..." : "Mint with PGirls"}
+        {displayButtonLabel}
       </button>
 
       {txHash && (
