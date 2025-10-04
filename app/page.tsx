@@ -47,6 +47,40 @@ const getContractAddress = (metadata: any): string => {
   return "";
 };
 
+const getTokenAddress = (metadata: any): string => {
+  if (!metadata || typeof metadata !== "object") {
+    return "";
+  }
+
+  const candidates: unknown[] = [
+    metadata.pgirlsTokenAddress,
+    metadata.pgirlsToken,
+    metadata.paymentTokenAddress,
+    metadata.paymentToken?.address,
+    metadata.payment_token,
+    metadata.tokenAddress,
+    metadata.token_address,
+    metadata.erc20Address,
+    metadata.erc20?.address,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeAddress(candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return "";
+};
+
+const DEFAULT_TOKEN_ADDRESS = normalizeAddress(
+  process.env.NEXT_PUBLIC_PGIRLS_TOKEN_ADDRESS ??
+    process.env.NEXT_PUBLIC_PGIRLS_ERC20 ??
+    process.env.NEXT_PUBLIC_PGIRLS_ERC20_ADDRESS ??
+    "0x654f25F2a36997C397Aad8a66D5a8783b6E61b9b"
+);
+
 export default function RahabMintSite() {
   const [categories, setCategories] = useState<string[]>([]);
   const [nfts, setNfts] = useState<MetaDict>({});
@@ -344,12 +378,13 @@ export default function RahabMintSite() {
             </h2>
             {nfts[cat]?.map(({ fileName, metadata }, i) => {
               const contractAddress = getContractAddress(metadata);
+              const tokenAddress = getTokenAddress(metadata) || DEFAULT_TOKEN_ADDRESS;
 
               return (
                 <div key={`${cat}-${fileName}`} style={{ marginBottom: "2rem" }}>
                   <PaymentNFT
                     nftContractAddr={contractAddress}
-                    erc20Address={"0x654f25F2a36997C397Aad8a66D5a8783b6E61b9b"}
+                    erc20Address={tokenAddress}
                     tokenId={BigInt((starts[cat] ?? 1) + i)}
                     mediaUrl={metadata.image || metadata.animation_url}
                     price={(metadata.price ?? "")
