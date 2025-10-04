@@ -4,6 +4,66 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ethers } from "ethers";
 import PaymentNFT from "./ui/PaymentNFT";
 
+type MetadataRecord = Record<string, unknown>;
+
+const DEFAULT_NFT_CONTRACT = "0x704Bf56A89c745e6A62C70803816E83b009d2211";
+const DEFAULT_ERC20_CONTRACT = "0x654f25F2a36997C397Aad8a66D5a8783b6E61b9b";
+
+const ADDRESS_KEYS = {
+  nft: [
+    "nftContractAddr",
+    "nftContractAddress",
+    "contractAddress",
+    "collectionAddress",
+    "nftAddress",
+    "collection",
+    "address",
+  ],
+  erc20: [
+    "erc20Address",
+    "pgirlsTokenAddress",
+    "tokenAddress",
+    "paymentTokenAddress",
+    "pgirlsToken",
+    "paymentToken",
+    "token",
+  ],
+} as const;
+
+const isRecord = (value: unknown): value is MetadataRecord =>
+  typeof value === "object" && value !== null;
+
+const getMetadataProps = (metadata: unknown): MetadataRecord => {
+  if (!isRecord(metadata)) {
+    return {};
+  }
+  const props = (metadata as MetadataRecord)["props"];
+  return isRecord(props) ? (props as MetadataRecord) : {};
+};
+
+const pickAddressFromMetadata = (
+  metadata: unknown,
+  keys: readonly string[],
+  fallback?: string
+) => {
+  const metaRecord = isRecord(metadata) ? metadata : {};
+  const props = getMetadataProps(metadata);
+
+  for (const key of keys) {
+    const propValue = props[key];
+    if (typeof propValue === "string" && propValue.trim()) {
+      return propValue.trim();
+    }
+
+    const directValue = metaRecord[key];
+    if (typeof directValue === "string" && directValue.trim()) {
+      return directValue.trim();
+    }
+  }
+
+  return fallback ?? "";
+};
+
 type Item = { fileName: string; metadata: any };
 type MetaDict = Record<string, Item[]>;
 
@@ -377,32 +437,38 @@ export default function RahabMintSite() {
               {cat}
             </h2>
             {nfts[cat]?.map(({ fileName, metadata }, i) => {
-              const contractAddress = getContractAddress(metadata);
-              const tokenAddress = getTokenAddress(metadata) || DEFAULT_TOKEN_ADDRESS;
+              const nftContractAddr = pickAddressFromMetadata(
+                metadata,
+                ADDRESS_KEYS.nft,
+                DEFAULT_NFT_CONTRACT
+              );
+              const erc20Address = pickAddressFromMetadata(
+                metadata,
+                ADDRESS_KEYS.erc20,
+                DEFAULT_ERC20_CONTRACT
+              );
 
               return (
                 <div key={`${cat}-${fileName}`} style={{ marginBottom: "2rem" }}>
                   <PaymentNFT
-                    nftContractAddr={contractAddress}
-                    erc20Address={tokenAddress}
+                    nftContractAddr={nftContractAddr}
+                    erc20Address={erc20Address || undefined}
                     tokenId={BigInt((starts[cat] ?? 1) + i)}
-                    mediaUrl={metadata.image || metadata.animation_url}
-                    price={(metadata.price ?? "")
+                    mediaUrl={(metadata as any).image || (metadata as any).animation_url}
+                    price={((metadata as any).price ?? "")
                       .toString()
                       .replace(/[^\d.]/g, "")}
                     category={cat}
                     fileName={fileName}
                     langStr="en-US"
-                    initialSoldout={Boolean(metadata.soldout)}
-                    initialMintStatus={(metadata.mintStatus ?? "BeforeList") as string}
+                    initialSoldout={Boolean((metadata as any).soldout)}
+                    initialMintStatus={((metadata as any).mintStatus ?? "BeforeList") as string}
                     ownerAddress={
-                      (metadata.ownerAddress ||
-                        metadata.owner ||
-                        metadata.walletAddress ||
+                      ((metadata as any).ownerAddress ||
+                        (metadata as any).owner ||
+                        (metadata as any).walletAddress ||
                         "") as string
                     }
-                    provider={provider}
-                    account={account}
                   />
                 </div>
               );

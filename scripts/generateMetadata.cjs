@@ -3,18 +3,20 @@
 
 const fs = require("fs");
 const path = require("path");
-const { ethers } = require("ethers");
+const { Wallet } = require("ethers");
 
-// ===== .env 読み込み（プロジェクトルート固定 & 変数展開対応） =====
-const PROJECT_ROOT = path.join(__dirname, "..");
-const dotenv = require("dotenv");
-let dotenvExpand;
-try { dotenvExpand = require("dotenv-expand"); } catch { /* optional */ }
+const ASSETS_DIR = path.join(__dirname, "../public/assets");
+const OUTPUT_DIR = path.join(__dirname, "../metadata");
+const BASE_URL = "https://mint.rahabpunkaholicgirls.com/assets";
+const OWNER_PRIVATE_KEY = (
+  process.env.OWNER_PRIVATE_KEY || process.env.METADATA_OWNER_PRIVATE_KEY || ""
+)
+  .trim()
+  .replace(/^['"]+|['"]+$/g, "");
 
-function loadEnv(file) {
-  if (fs.existsSync(file)) {
-    const parsed = dotenv.config({ path: file });
-    if (!parsed.error && dotenvExpand) dotenvExpand.expand(parsed);
+function resolveOwnerAddressFromPrivateKey() {
+  if (!OWNER_PRIVATE_KEY) {
+    return "";
   }
 }
 loadEnv(path.join(PROJECT_ROOT, ".env.local"));
@@ -80,10 +82,11 @@ if (!RPC_URL)     throw new Error(".env の RPC_URL が未設定です");
 const FACTORY = toChecksumAddressOrThrow("CREATE2_DEPLOYER/FACTORY/NEXT_PUBLIC_FACTORY", FACTORY_RAW);
 const OWNER   = toChecksumAddressOrThrow("NFT_OWNER/NEXT_PUBLIC_NFT_OWNER/TREASURY_ADDRESS/OWNER/OWNER_ADDRESS", OWNER_RAW);
 
-// ===== Artifact =====
-const ARTIFACT_PATH = path.join(PROJECT_ROOT, "artifacts", "contracts", "ERC721Collection.sol", "ERC721Collection.json");
-if (!fs.existsSync(ARTIFACT_PATH)) {
-  throw new Error(`Artifact not found: ${ARTIFACT_PATH}\n先に "npx hardhat compile" を実行してください。`);
+if (!DEFAULT_OWNER_ADDRESS) {
+  console.error(
+    "[metadata] OWNER_PRIVATE_KEY (or METADATA_OWNER_PRIVATE_KEY) is missing or invalid. Unable to derive owner address."
+  );
+  process.exit(1);
 }
 const collArtifact = require(ARTIFACT_PATH);
 
