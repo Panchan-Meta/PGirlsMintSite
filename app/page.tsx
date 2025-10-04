@@ -7,38 +7,6 @@ import PaymentNFT from "./ui/PaymentNFT";
 type Item = { fileName: string; metadata: any };
 type MetaDict = Record<string, Item[]>;
 
-const CONTRACT_ADDRESS_KEYS = [
-  "nftContractAddr",
-  "nftContractAddress",
-  "contractAddress",
-  "contract_address",
-  "nftContract",
-  "nft_address",
-  "contract",
-  "address",
-] as const;
-
-const isPlainObject = (value: unknown): value is Record<string, unknown> => {
-  return typeof value === "object" && value !== null;
-};
-
-const getContractAddress = (metadata: unknown): string => {
-  if (!isPlainObject(metadata)) {
-    return "";
-  }
-
-  for (const key of CONTRACT_ADDRESS_KEYS) {
-    const candidate = metadata[key];
-    if (typeof candidate !== "string") continue;
-
-    const trimmed = candidate.trim();
-    if (!trimmed) continue;
-
-    if (ethers.isAddress(trimmed)) {
-      try {
-        return ethers.getAddress(trimmed);
-      } catch {
-        // ignore checksum errors and keep searching
       }
     }
   }
