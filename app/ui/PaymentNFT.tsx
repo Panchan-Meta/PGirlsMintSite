@@ -325,6 +325,9 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         }
         const raw = await erc20r.balanceOf(ownerAddr);
         setBalance(ethers.formatUnits(raw, d));
+      } catch (balanceRefreshErr) {
+        console.error(balanceRefreshErr);
+      }
 
       // ---- メタデータ側にも soldout を反映（フォールバック） ----
       try {
@@ -349,6 +352,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       setMintStatus("BeforeList");
       setActivePrice("");
       setListPriceInput("");
+      await checkSoldOut();
     } catch (e: any) {
       console.error(e);
       alert(e?.reason || e?.message || "Mint failed");
@@ -369,6 +373,8 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     category,
     fileName,
     mintStatus,
+    checkSoldOut,
+  ]);
 
   const handlePriceChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -382,6 +388,103 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       }
     },
     [mintStatus]
+  );
+
+  const isOwner = useMemo(() => {
+    if (!account || !ownerAddress) return false;
+    return account.trim().toLowerCase() === ownerAddress.trim().toLowerCase();
+  }, [account, ownerAddress]);
+
+  const disableListingButton = useMemo(() => {
+    if (updatingListing || !isOwner) return true;
+    const trimmed = listPriceInput.trim();
+    if (mintStatus === "Listed") {
+      return trimmed === (activePrice || "");
+    }
+    return trimmed.length === 0;
+  }, [updatingListing, isOwner, listPriceInput, mintStatus, activePrice]);
+
+  const handleListingUpdate = useCallback(async () => {
+    if (!isOwner) {
+      alert("Only the owner can update the listing");
+      return;
+    }
+
+    const trimmed = listPriceInput.trim();
+    const willList = trimmed.length > 0;
+    if (!willList && mintStatus !== "Listed") {
+      return;
+    }
+
+    setUpdatingListing(true);
+    try {
+      const response = await fetch(`/api/updateListing`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category,
+          fileName,
+          mintStatus: willList ? "Listed" : "BeforeList",
+          price: trimmed,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to update listing");
+      }
+
+      const metadata = (payload as any)?.metadata ?? {};
+      const rawStatus =
+        typeof metadata.mintStatus === "string" ? metadata.mintStatus : undefined;
+      const rawPrice =
+        typeof metadata.price === "string"
+          ? metadata.price
+          : typeof metadata.price !== "undefined" && metadata.price !== null
+          ? String(metadata.price)
+          : undefined;
+
+      const nextStatus = rawStatus ?? (willList ? "Listed" : "BeforeList");
+      const nextPrice = rawPrice ?? (willList ? trimmed : "");
+
+      setMintStatus(nextStatus);
+      setActivePrice(nextPrice);
+      setListPriceInput(nextPrice);
+      if (!willList) {
+        setIsSoldOut(false);
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || "Failed to update listing");
+    } finally {
+      setUpdatingListing(false);
+    }
+  }, [
+    isOwner,
+    listPriceInput,
+    mintStatus,
+    category,
+    fileName,
+  ]);
+
+  const displayButtonLabel = useMemo(() => {
+    if (minting) return "Processing...";
+    if (!provider) return "Wallet Not Found";
+    if (!account) return "Connect Wallet";
+    if (isSoldOut) return "Sold Out";
+    if (mintStatus !== "Listed") return "Not Listed";
+    if (!activePrice) return "No Price";
+    return "Mint";
+  }, [minting, provider, account, isSoldOut, mintStatus, activePrice]);
+
+  const isDisabled = useMemo(
+    () =>
+      minting ||
+      !provider ||
+      !account ||
+      mintStatus !== "Listed" ||
+      !activePrice ||
+      isSoldOut,
+    [minting, provider, account, mintStatus, activePrice, isSoldOut]
   );
 
   return (
