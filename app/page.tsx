@@ -139,11 +139,20 @@ export default function RahabMintSite() {
                   erc20Address={"0x654f25F2a36997C397Aad8a66D5a8783b6E61b9b"}
                   tokenId={BigInt((starts[cat] ?? 1) + i)}
                   mediaUrl={metadata.image || metadata.animation_url}
-                  price={(metadata.price ?? "").toString().replace(/[^\d.]/g, "")}
+                  price={(metadata.price ?? "")
+                    .toString()
+                    .replace(/[^\d.]/g, "")}
                   category={cat}
                   fileName={fileName}
                   langStr="en-US"
                   initialSoldout={Boolean(metadata.soldout)}
+                  initialMintStatus={(metadata.mintStatus ?? "BeforeList") as string}
+                  ownerAddress={
+                    (metadata.ownerAddress ||
+                      metadata.owner ||
+                      metadata.walletAddress ||
+                      "") as string
+                  }
                 />
               </div>
             ))}

@@ -15,6 +15,8 @@ interface PaymentNFTProps {
   fileName: string;
   /** メタデータ由来の初期 soldout（オフチェーンフォールバック） */
   initialSoldout?: boolean;
+  initialMintStatus?: string;
+  ownerAddress?: string;
 }
 
 declare global {
@@ -126,6 +128,8 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     category,
     fileName,
     initialSoldout,
+    initialMintStatus,
+    ownerAddress,
   } = props;
 
   const [account, setAccount] = useState<string>("");
@@ -134,6 +138,28 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   const [isSoldOut, setIsSoldOut] = useState<boolean>(!!initialSoldout);
   const [erc20FromChain, setErc20FromChain] = useState<string>("");
   const [balance, setBalance] = useState<string>("");
+  const [mintStatus, setMintStatus] = useState<string>(
+    initialMintStatus || "BeforeList"
+  );
+  const [activePrice, setActivePrice] = useState<string>(price);
+  const [listPriceInput, setListPriceInput] = useState<string>(price);
+  const [updatingListing, setUpdatingListing] = useState<boolean>(false);
+  const [displayOwnerAddress, setDisplayOwnerAddress] = useState<string>(
+    ownerAddress || ""
+  );
+
+  useEffect(() => {
+    setMintStatus(initialMintStatus || "BeforeList");
+  }, [initialMintStatus]);
+
+  useEffect(() => {
+    setActivePrice(price);
+    setListPriceInput(price);
+  }, [price]);
+
+  useEffect(() => {
+    setDisplayOwnerAddress(ownerAddress || "");
+  }, [ownerAddress]);
   const explorerBase =
     process.env.NEXT_PUBLIC_PGIRLSCHAIN_EXPLORER ||
     "https://explorer.rahabpunkaholicgirls.com";
@@ -158,13 +184,20 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         if (addr && typeof addr === "string" && addr !== ethers.ZeroAddress) {
           setErc20FromChain(addr);
         }
-      } catch {}
+      } catch (err) {
+        console.error(err);
+      }
     })();
   }, [provider, nftContractAddr]);
 
   /** ---------- On-chain + Off-chain soldout check ---------- */
   const checkSoldOut = useCallback(async () => {
     try {
+      if (mintStatus !== "Listed") {
+        setIsSoldOut(false);
+        return;
+      }
+
       if (initialSoldout) {
         setIsSoldOut(true);
         return;
@@ -176,19 +209,30 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       try {
         const next: bigint = await nftRO.nextTokenId();
         if (tokenId < next) sold = true;
-      } catch {}
+      } catch (err) {
+        console.error(err);
+      }
 
       if (!sold) {
         try {
           await nftRO.ownerOf(tokenId);
           sold = true;
-        } catch {}
+        } catch (err) {
+          console.error(err);
+        }
       }
       setIsSoldOut(sold);
-    } catch {
+    } catch (err) {
+      console.error(err);
       // keep previous
     }
-  }, [provider, nftContractAddr, tokenId, initialSoldout]);
+  }, [
+    provider,
+    nftContractAddr,
+    tokenId,
+    initialSoldout,
+    mintStatus,
+  ]);
 
   /** 初期化：アカウント取得 & soldout チェック */
   useEffect(() => {
@@ -198,7 +242,8 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         await window.ethereum?.request?.({ method: "eth_requestAccounts" });
         const s = await provider.getSigner();
         setAccount(await s.getAddress());
-      } catch {
+      } catch (err) {
+        console.error(err);
         setAccount("");
       } finally {
         checkSoldOut();
@@ -214,16 +259,22 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         if (!provider || !account || !tokenAddr) return;
         const erc20r = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, provider);
         let decimals = 18;
-        try { decimals = Number(await erc20r.decimals()); } catch {}
+        try {
+          decimals = Number(await erc20r.decimals());
+        } catch (decimalsErr) {
+          console.error(decimalsErr);
+        }
         const raw = await erc20r.balanceOf(account);
         setBalance(ethers.formatUnits(raw, decimals));
-      } catch {}
+      } catch (balanceErr) {
+        console.error(balanceErr);
+      }
     })();
   }, [provider, account, erc20FromChain, erc20Address]);
 
   /** ---------- Mint ---------- */
   const handleMint = useCallback(async () => {
-    if (minting || isSoldOut) return;
+    if (minting || isSoldOut || mintStatus !== "Listed") return;
     try {
       setMinting(true);
       setTxHash(null);
@@ -238,9 +289,16 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       let decimals = 18;
       try {
         decimals = Number(await erc20.decimals());
-      } catch {}
+      } catch (err) {
+        console.error(err);
+      }
 
-      const parsedPrice = ethers.parseUnits((price ?? "0").toString(), decimals);
+      const priceValue = (activePrice || "").trim();
+      if (!priceValue) {
+        throw new Error("Listing price is missing");
+      }
+
+      const parsedPrice = ethers.parseUnits(priceValue, decimals);
       const ownerAddr = await signer.getAddress();
 
       const allowance: bigint = await erc20.allowance(ownerAddr, nftContractAddr);
@@ -259,28 +317,47 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       const receipt = await tx.wait();
       setTxHash(receipt?.hash ?? tx.hash);
 
-      // ★ 即時反映：UI上で売切れにする
-      setIsSoldOut(true);
+      // ★ 即時反映：UI上で初期状態に戻す
+      setIsSoldOut(false);
 
       // 残高更新
       try {
         const erc20r = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, provider);
-        let d = 18; try { d = Number(await erc20r.decimals()); } catch {}
+        let d = 18;
+        try {
+          d = Number(await erc20r.decimals());
+        } catch (err) {
+          console.error(err);
+        }
         const raw = await erc20r.balanceOf(ownerAddr);
         setBalance(ethers.formatUnits(raw, d));
-      } catch {}
-
-      // オンチェーン確認（保険）
-      await checkSoldOut();
+      } catch (balanceErr) {
+        console.error(balanceErr);
+      }
 
       // ---- メタデータ側にも soldout を反映（フォールバック） ----
       try {
-        await fetch(`/api/markSoldOut`, {
+        const response = await fetch(`/api/updateListing`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ category, fileName }),
+          body: JSON.stringify({
+            category,
+            fileName,
+            mintStatus: "BeforeList",
+            price: "",
+          }),
         });
-      } catch {}
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          throw new Error(body.error || "Failed to reset listing");
+        }
+      } catch (err) {
+        console.error(err);
+      }
+
+      setMintStatus("BeforeList");
+      setActivePrice("");
+      setListPriceInput("");
     } catch (e: any) {
       console.error(e);
       alert(e?.reason || e?.message || "Mint failed");
@@ -295,24 +372,191 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     erc20Address,
     erc20FromChain,
     nftContractAddr,
-    price,
+    activePrice,
     langStr,
     tokenId,
-    checkSoldOut,
     category,
     fileName,
+    mintStatus,
   ]);
 
-  const isDisabled = minting || isSoldOut;
+  const isDisabled =
+    minting || isSoldOut || mintStatus !== "Listed" || !activePrice?.trim();
+
+  const displayButtonLabel = isSoldOut
+    ? "Sold out"
+    : minting
+    ? "Processing..."
+    : mintStatus === "Listed"
+    ? "Mint with PGirls"
+    : "Not Listed";
+
+  const trimmedListPrice = (listPriceInput || "").trim();
+  const disableListingButton =
+    updatingListing ||
+    !trimmedListPrice ||
+    (mintStatus === "Listed" && trimmedListPrice === (activePrice || "").trim());
+
+  const handleListingUpdate = useCallback(async () => {
+    if (updatingListing || isSoldOut) return;
+    const sanitized = (listPriceInput || "").trim();
+    if (!sanitized) {
+      alert("Please input price before listing.");
+      return;
+    }
+    if (
+      mintStatus === "Listed" &&
+      sanitized === (activePrice || "").trim()
+    ) {
+      alert("Price is unchanged.");
+      return;
+    }
+    try {
+      setUpdatingListing(true);
+      if (!provider || !window.ethereum) {
+        alert("Wallet provider is required for listing.");
+        return;
+      }
+
+      await window.ethereum.request?.({ method: "eth_requestAccounts" });
+      const signer = await getSigner();
+      if (!signer) {
+        alert("Failed to get wallet signer.");
+        return;
+      }
+
+      const connectedAddress = (await signer.getAddress()) || "";
+      const normalizedConnected = connectedAddress.toLowerCase();
+      const normalizedOwner = (displayOwnerAddress || "").trim().toLowerCase();
+
+      if (normalizedOwner && normalizedOwner !== normalizedConnected) {
+        alert("Connected wallet does not match the owner address.");
+        return;
+      }
+
+      const response = await fetch(`/api/updateListing`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category,
+          fileName,
+          mintStatus: "Listed",
+          price: sanitized,
+          ownerAddress:
+            (displayOwnerAddress || "").trim() || connectedAddress,
+        }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || "Failed to update listing");
+      }
+      const body = await response.json().catch(() => ({}));
+      const updated = body?.metadata ?? {};
+      setMintStatus((updated.mintStatus as string) || "Listed");
+      const newPrice = (updated.price as string) || sanitized;
+      setActivePrice(newPrice);
+      setListPriceInput(newPrice);
+      if (updated.ownerAddress) {
+        setDisplayOwnerAddress(updated.ownerAddress as string);
+      } else {
+        setDisplayOwnerAddress(
+          (displayOwnerAddress || "").trim() || connectedAddress
+        );
+      }
+      setAccount(connectedAddress);
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || "Failed to update listing");
+    } finally {
+      setUpdatingListing(false);
+    }
+  }, [
+    updatingListing,
+    isSoldOut,
+    listPriceInput,
+    category,
+    fileName,
+    provider,
+    getSigner,
+    displayOwnerAddress,
+  ]);
+
+  const handlePriceChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = e.target.value;
+      const sanitized = value
+        .replace(/[^\d.]/g, "")
+        .replace(/(\..*)\./g, "$1");
+      setListPriceInput(sanitized);
+      if (mintStatus !== "Listed") {
+        setActivePrice(sanitized);
+      }
+    },
+    [mintStatus]
+  );
 
   return (
     <div style={{ textAlign: "center" }}>
       <AutoMedia providedUrl={mediaUrl} category={category} fileName={fileName} />
 
-      <p style={{ fontSize: "0.9rem", color: "#ccc" }}>Price: {price} PGirls</p>
+      <p style={{ fontSize: "0.9rem", color: "#ccc" }}>
+        Price: {activePrice ? `${activePrice} PGirls` : "-"}
+      </p>
       <p style={{ fontSize: "0.85rem", color: "#aaa" }}>
         Your PGirls balance (on-chain): {balance || "-"}
       </p>
+
+      <p style={{ fontSize: "0.85rem", color: "#aaa" }}>
+        Owner Address:{" "}
+        <span style={{ fontFamily: "monospace" }}>
+          {displayOwnerAddress || "-"}
+        </span>
+      </p>
+
+      {!isSoldOut && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.5rem",
+            alignItems: "center",
+            marginTop: "0.75rem",
+          }}
+        >
+          <input
+            type="text"
+            inputMode="decimal"
+            value={listPriceInput}
+            onChange={handlePriceChange}
+            placeholder="Enter price in PGirls"
+            style={{
+              padding: "0.5rem",
+              borderRadius: "6px",
+              border: "1px solid #444",
+              background: "#111",
+              color: "#fff",
+              width: "200px",
+              textAlign: "center",
+            }}
+          />
+          <button
+            onClick={handleListingUpdate}
+            disabled={disableListingButton}
+            style={{
+              padding: "0.5rem 1rem",
+              backgroundColor:
+                disableListingButton ? "#444" : "#28a745",
+              color: "white",
+              border: "none",
+              borderRadius: "6px",
+              cursor:
+                disableListingButton ? "not-allowed" : "pointer",
+            }}
+          >
+            {mintStatus === "Listed" ? "Update Listing" : "List for Sale"}
+          </button>
+        </div>
+      )}
 
       <button
         onClick={handleMint}
@@ -327,7 +571,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
           cursor: isDisabled ? "not-allowed" : "pointer",
         }}
       >
-        {isSoldOut ? "Sold out" : minting ? "Processing..." : "Mint with PGirls"}
+        {displayButtonLabel}
       </button>
 
       {txHash && (
