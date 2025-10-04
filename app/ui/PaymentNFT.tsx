@@ -98,6 +98,9 @@ function AutoMedia({
 }
 
 /** ---------- Minimal ABIs ---------- */
+const DEFAULT_MINT_STATUS = "BeforeList";
+const LISTED_STATUS = "Listed";
+
 const NFT_ABI_MIN = [
   "function nextTokenId() view returns (uint256)",
   "function ownerOf(uint256 tokenId) view returns (address)",
@@ -142,7 +145,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     ownerAddress?.trim() ?? ""
   );
   const [mintStatus, setMintStatus] = useState<string>(
-    initialMintStatus || "BeforeList"
+    initialMintStatus || DEFAULT_MINT_STATUS
   );
   const [activePrice, setActivePrice] = useState<string>(price);
   const [listPriceInput, setListPriceInput] = useState<string>(price);
@@ -153,7 +156,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   }, [ownerAddress]);
 
   useEffect(() => {
-    setMintStatus(initialMintStatus || "BeforeList");
+    setMintStatus(initialMintStatus || DEFAULT_MINT_STATUS);
   }, [initialMintStatus]);
 
   useEffect(() => {
@@ -194,7 +197,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   /** ---------- On-chain + Off-chain soldout check ---------- */
   const checkSoldOut = useCallback(async () => {
     try {
-      if (mintStatus !== "Listed") {
+      if (mintStatus !== LISTED_STATUS) {
         setIsSoldOut(false);
         return;
       }
@@ -282,7 +285,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
 
   /** ---------- Mint ---------- */
   const handleMint = useCallback(async () => {
-    if (minting || isSoldOut || mintStatus !== "Listed") return;
+    if (minting || isSoldOut || mintStatus !== LISTED_STATUS) return;
     try {
       setMinting(true);
       setTxHash(null);
@@ -355,7 +358,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
           body: JSON.stringify({
             category,
             fileName,
-            mintStatus: "BeforeList",
+            mintStatus: DEFAULT_MINT_STATUS,
             price: "",
             ownerAddress: normalizedOwnerAddr,
           }),
@@ -373,7 +376,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         console.error(err);
       }
 
-      setMintStatus("BeforeList");
+      setMintStatus(DEFAULT_MINT_STATUS);
       setActivePrice("");
       setListPriceInput("");
       await checkSoldOut();
@@ -408,7 +411,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         .replace(/[^\d.]/g, "")
         .replace(/(\..*)\./g, "$1");
       setListPriceInput(sanitized);
-      if (mintStatus !== "Listed") {
+      if (mintStatus !== LISTED_STATUS) {
         setActivePrice(sanitized);
       }
     },
@@ -425,7 +428,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   const disableListingButton = useMemo(() => {
     if (updatingListing || !isOwner) return true;
     const trimmed = listPriceInput.trim();
-    if (mintStatus === "Listed") {
+    if (mintStatus === LISTED_STATUS) {
       return trimmed === (activePrice || "");
     }
     return trimmed.length === 0;
@@ -439,7 +442,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
 
     const trimmed = listPriceInput.trim();
     const willList = trimmed.length > 0;
-    if (!willList && mintStatus !== "Listed") {
+    if (!willList && mintStatus !== LISTED_STATUS) {
       return;
     }
 
@@ -451,7 +454,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         body: JSON.stringify({
           category,
           fileName,
-          mintStatus: willList ? "Listed" : "BeforeList",
+          mintStatus: willList ? LISTED_STATUS : DEFAULT_MINT_STATUS,
           price: trimmed,
         }),
       });
@@ -470,7 +473,8 @@ export default function PaymentNFT(props: PaymentNFTProps) {
           ? String(metadata.price)
           : undefined;
 
-      const nextStatus = rawStatus ?? (willList ? "Listed" : "BeforeList");
+      const nextStatus =
+        rawStatus ?? (willList ? LISTED_STATUS : DEFAULT_MINT_STATUS);
       const nextPrice = rawPrice ?? (willList ? trimmed : "");
       const nextOwner = getOwnerFromMetadata(metadata);
 
@@ -503,7 +507,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     if (!provider) return "Wallet Not Found";
     if (!account) return "Connect Wallet";
     if (isSoldOut) return "Sold Out";
-    if (mintStatus !== "Listed") return "Not Listed";
+    if (mintStatus !== LISTED_STATUS) return "Not Listed";
     if (!activePrice) return "No Price";
     return "Mint";
   }, [minting, provider, account, isSoldOut, mintStatus, activePrice]);
@@ -513,7 +517,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       minting ||
       !provider ||
       !account ||
-      mintStatus !== "Listed" ||
+      mintStatus !== LISTED_STATUS ||
       !activePrice ||
       isSoldOut,
     [minting, provider, account, mintStatus, activePrice, isSoldOut]
@@ -573,7 +577,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
                 disableListingButton ? "not-allowed" : "pointer",
             }}
           >
-            {mintStatus === "Listed" ? "Update Listing" : "List for Sale"}
+            {mintStatus === LISTED_STATUS ? "Update Listing" : "List for Sale"}
           </button>
         </div>
       )}

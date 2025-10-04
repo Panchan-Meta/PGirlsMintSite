@@ -34,6 +34,7 @@ const DEFAULT_PRICE_PFP   = String(process.env.DEFAULT_PRICE_PFP ?? "20");
 const DEFAULT_PRICE_MUSIC = String(process.env.DEFAULT_PRICE_MUSIC ?? "8");
 const isPfpCollection     = (name) => /pfp/i.test(name);
 const defaultPriceFor     = (name) => isPfpCollection(name) ? DEFAULT_PRICE_PFP : DEFAULT_PRICE_MUSIC;
+const defaultMintStatus   = "BeforeList";
 
 // 環境変数（CREATE2 ファクトリ等）: 別名も許容
 const FACTORY_RAW = process.env.CREATE2_DEPLOYER
@@ -122,16 +123,10 @@ function listImagesRecursive(dir, baseDir) {
 }
 const readJsonSafe = (p) => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return null; } };
 
-// --- price/soldout を正規化（price=string / soldout=boolean）
-function normalizeMeta(meta, collectionName) {
-  const out = { ...(meta || {}) };
-  const needPrice = typeof out.price === "undefined" || out.price === "" || out.price === 0 || out.price === "0";
-  if (needPrice) out.price = defaultPriceFor(collectionName);
-  if (typeof out.soldout === "undefined") out.soldout = false;
-  out.price = String(out.price);
-  out.soldout = !!out.soldout;
-  return out;
-}
+const baseDefaultsFor = (collectionName) => ({
+  price: defaultPriceFor(collectionName),
+  soldout: false,
+});
 
 // コレクション単位の salt
 function collectionSalt(collectionName) {
@@ -204,17 +199,9 @@ async function genOneCollection(provider, collectionName, allRows) {
 
     const existing = fs.existsSync(jsonAbs) ? readJsonSafe(jsonAbs) : null;
 
-    // 既存を補正（price/soldout）
-    if (existing && !DRY_RUN) {
-      const patched = normalizeMeta(existing, collectionName);
-      if (JSON.stringify(patched) !== JSON.stringify(existing)) {
-        fs.writeFileSync(jsonAbs, JSON.stringify(patched, null, 2), "utf8");
-      }
-    }
-
     // 新規生成：contractAddress は全てコレクションの predicted、tokenId は連番
     if ((!existing) && !DRY_RUN) {
-      const base = normalizeMeta(existing || {}, collectionName);
+      const defaults = baseDefaultsFor(collectionName);
       const meta = {
         name,
         description: name,
@@ -223,15 +210,33 @@ async function genOneCollection(provider, collectionName, allRows) {
         attributes: [],
         tokenId: tokenCounter,
         contractAddress: predictedCollection,
-        price: base.price,
-        soldout: base.soldout,
+        price: defaults.price,
+        soldout: defaults.soldout,
+        mintStatus: defaultMintStatus,
+        ownerAddress: OWNER,
+        owner: OWNER,
+        walletAddress: OWNER,
         category: collectionName,
         fileName: jsonRel,
       };
       fs.writeFileSync(jsonAbs, JSON.stringify(meta, null, 2), "utf8");
     }
 
+    const defaults = baseDefaultsFor(collectionName);
     const finalMeta = readJsonSafe(jsonAbs) || {};
+    const finalPrice =
+      typeof finalMeta.price === "undefined" || finalMeta.price === null || finalMeta.price === ""
+        ? defaults.price
+        : String(finalMeta.price);
+    const finalSoldout = typeof finalMeta.soldout === "boolean"
+      ? finalMeta.soldout
+      : typeof finalMeta.soldout === "string"
+        ? finalMeta.soldout.toLowerCase() === "true"
+        : Boolean(
+            typeof finalMeta.soldout === "number"
+              ? finalMeta.soldout
+              : finalMeta.soldout ?? defaults.soldout
+          );
     const row = {
       collection: collectionName,
       index: String(tokenCounter),
@@ -241,8 +246,8 @@ async function genOneCollection(provider, collectionName, allRows) {
       image: imageUrl,
       contractAddress: predictedCollection,
       fileName: jsonRel,
-      price: String(finalMeta.price ?? defaultPriceFor(collectionName)),
-      soldout: !!finalMeta.soldout,
+      price: String(finalPrice),
+      soldout: finalSoldout,
       tokenId: String(tokenCounter),
     };
     rows.push(row);
