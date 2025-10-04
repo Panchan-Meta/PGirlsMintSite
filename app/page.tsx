@@ -469,6 +469,8 @@ export default function RahabMintSite() {
                         (metadata as any).walletAddress ||
                         "") as string
                     }
+                    provider={provider}
+                    account={account}
                   />
                 </div>
               );
