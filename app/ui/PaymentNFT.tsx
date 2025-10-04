@@ -145,6 +145,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   const [listPriceInput, setListPriceInput] = useState<string>(price);
   const [updatingListing, setUpdatingListing] = useState<boolean>(false);
 
+
   useEffect(() => {
     setMintStatus(initialMintStatus || "BeforeList");
   }, [initialMintStatus]);
@@ -153,6 +154,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     setActivePrice(price);
     setListPriceInput(price);
   }, [price]);
+
   const explorerBase =
     process.env.NEXT_PUBLIC_PGIRLSCHAIN_EXPLORER ||
     "https://explorer.rahabpunkaholicgirls.com";
@@ -184,6 +186,11 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   /** ---------- On-chain + Off-chain soldout check ---------- */
   const checkSoldOut = useCallback(async () => {
     try {
+      if (mintStatus !== "Listed") {
+        setIsSoldOut(false);
+        return;
+      }
+
       if (initialSoldout) {
         setIsSoldOut(true);
         return;
@@ -207,7 +214,13 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     } catch {
       // keep previous
     }
-  }, [provider, nftContractAddr, tokenId, initialSoldout]);
+  }, [
+    provider,
+    nftContractAddr,
+    tokenId,
+    initialSoldout,
+    mintStatus,
+  ]);
 
   /** 初期化：アカウント取得 & soldout チェック */
   useEffect(() => {
@@ -283,8 +296,8 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       const receipt = await tx.wait();
       setTxHash(receipt?.hash ?? tx.hash);
 
-      // ★ 即時反映：UI上で売切れにする
-      setIsSoldOut(true);
+      // ★ 即時反映：UI上で初期状態に戻す
+      setIsSoldOut(false);
 
       // 残高更新
       try {
@@ -293,9 +306,6 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         const raw = await erc20r.balanceOf(ownerAddr);
         setBalance(ethers.formatUnits(raw, d));
       } catch {}
-
-      // オンチェーン確認（保険）
-      await checkSoldOut();
 
       // ---- メタデータ側にも soldout を反映（フォールバック） ----
       try {
@@ -337,78 +347,9 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     activePrice,
     langStr,
     tokenId,
-    checkSoldOut,
     category,
     fileName,
     mintStatus,
-  ]);
-
-  const isDisabled =
-    minting || isSoldOut || mintStatus !== "Listed" || !activePrice?.trim();
-
-  const displayButtonLabel = isSoldOut
-    ? "Sold out"
-    : minting
-    ? "Processing..."
-    : mintStatus === "Listed"
-    ? "Mint with PGirls"
-    : "Not Listed";
-
-  const trimmedListPrice = (listPriceInput || "").trim();
-  const disableListingButton =
-    updatingListing ||
-    !trimmedListPrice ||
-    (mintStatus === "Listed" && trimmedListPrice === (activePrice || "").trim());
-
-  const handleListingUpdate = useCallback(async () => {
-    if (updatingListing || isSoldOut) return;
-    const sanitized = (listPriceInput || "").trim();
-    if (!sanitized) {
-      alert("Please input price before listing.");
-      return;
-    }
-    if (
-      mintStatus === "Listed" &&
-      sanitized === (activePrice || "").trim()
-    ) {
-      alert("Price is unchanged.");
-      return;
-    }
-    try {
-      setUpdatingListing(true);
-      const response = await fetch(`/api/updateListing`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          category,
-          fileName,
-          mintStatus: "Listed",
-          price: sanitized,
-        }),
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body.error || "Failed to update listing");
-      }
-      const body = await response.json().catch(() => ({}));
-      const updated = body?.metadata ?? {};
-      setMintStatus((updated.mintStatus as string) || "Listed");
-      const newPrice = (updated.price as string) || sanitized;
-      setActivePrice(newPrice);
-      setListPriceInput(newPrice);
-    } catch (e: any) {
-      console.error(e);
-      alert(e?.message || "Failed to update listing");
-    } finally {
-      setUpdatingListing(false);
-    }
-  }, [
-    updatingListing,
-    isSoldOut,
-    listPriceInput,
-    category,
-    fileName,
-  ]);
 
   const handlePriceChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -435,12 +376,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         Your PGirls balance (on-chain): {balance || "-"}
       </p>
 
-      {ownerAddress && (
-        <p style={{ fontSize: "0.85rem", color: "#aaa" }}>
-          Owner Address:{" "}
-          <span style={{ fontFamily: "monospace" }}>{ownerAddress}</span>
-        </p>
-      )}
+
 
       {!isSoldOut && (
         <div
