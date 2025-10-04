@@ -171,12 +171,6 @@ function getFriendlyErrorMessage(error: any): string {
     return "Insufficient PGirls token balance (insufficient funds error).";
   }
 
-  if (
-    ALLOWANCE_RESET_PATTERNS.some((pattern) => normalized.includes(pattern))
-  ) {
-    return "Approval failed. Please try again after your wallet processes the allowance transactions.";
-  }
-
   return raw;
 }
 
