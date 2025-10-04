@@ -7,7 +7,40 @@ import PaymentNFT from "./ui/PaymentNFT";
 type Item = { fileName: string; metadata: any };
 type MetaDict = Record<string, Item[]>;
 
-      }
+const normalizeAddress = (value: unknown): string => {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  try {
+    return ethers.getAddress(trimmed);
+  } catch {
+    return trimmed;
+  }
+};
+
+const getContractAddress = (metadata: any): string => {
+  if (!metadata || typeof metadata !== "object") {
+    return "";
+  }
+
+  const candidates: unknown[] = [
+    metadata.contractAddress,
+    metadata.contract_address,
+    metadata.contract?.address,
+    metadata.address,
+    metadata.collection?.address,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeAddress(candidate);
+    if (normalized) {
+      return normalized;
     }
   }
 
