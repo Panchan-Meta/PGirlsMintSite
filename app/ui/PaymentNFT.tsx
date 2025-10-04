@@ -425,17 +425,23 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     );
   }, [account, currentOwnerAddress]);
 
+  const canList = useMemo(() => {
+    if (!isOwner) return false;
+    if (isSoldOut) return false;
+    return true;
+  }, [isOwner, isSoldOut]);
+
   const disableListingButton = useMemo(() => {
-    if (updatingListing || !isOwner) return true;
+    if (updatingListing || !canList) return true;
     const trimmed = listPriceInput.trim();
     if (mintStatus === LISTED_STATUS) {
       return trimmed === (activePrice || "");
     }
     return trimmed.length === 0;
-  }, [updatingListing, isOwner, listPriceInput, mintStatus, activePrice]);
+  }, [updatingListing, canList, listPriceInput, mintStatus, activePrice]);
 
   const handleListingUpdate = useCallback(async () => {
-    if (!isOwner) {
+    if (!canList) {
       alert("Only the owner can update the listing");
       return;
     }
@@ -494,7 +500,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       setUpdatingListing(false);
     }
   }, [
-    isOwner,
+    canList,
     listPriceInput,
     mintStatus,
     category,
@@ -533,9 +539,18 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       <p style={{ fontSize: "0.85rem", color: "#ccc" }}>
         Owner Address: {currentOwnerAddress || "-"}
       </p>
-      <p style={{ fontSize: "0.85rem", color: "#aaa" }}>
-        Your PGirls balance (on-chain): {balance || "-"}
+      <p style={{ fontSize: "0.85rem", color: "#ccc" }}>
+        Connected Wallet: {account || "-"}
       </p>
+      {canList ? (
+        <p style={{ fontSize: "0.85rem", color: "#8ecbff" }}>
+          You own this NFT. PGirls balance: {balance || "0"}
+        </p>
+      ) : (
+        <p style={{ fontSize: "0.8rem", color: "#888" }}>
+          Connect the owner wallet to manage the listing.
+        </p>
+      )}
 
       {!isSoldOut && (
         <div
@@ -553,14 +568,17 @@ export default function PaymentNFT(props: PaymentNFTProps) {
             value={listPriceInput}
             onChange={handlePriceChange}
             placeholder="Enter price in PGirls"
+            disabled={!canList}
             style={{
               padding: "0.5rem",
               borderRadius: "6px",
               border: "1px solid #444",
-              background: "#111",
+              background: canList ? "#111" : "#1a1a1a",
               color: "#fff",
               width: "200px",
               textAlign: "center",
+              opacity: canList ? 1 : 0.5,
+              cursor: canList ? "text" : "not-allowed",
             }}
           />
           <button
