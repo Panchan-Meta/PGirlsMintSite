@@ -5,7 +5,9 @@ const { Wallet } = require("ethers");
 const ASSETS_DIR = path.join(__dirname, "../public/assets");
 const OUTPUT_DIR = path.join(__dirname, "../metadata");
 const BASE_URL = "https://mint.rahabpunkaholicgirls.com/assets";
-const OWNER_PRIVATE_KEY = (process.env.METADATA_OWNER_PRIVATE_KEY || "").trim();
+const OWNER_PRIVATE_KEY = (process.env.METADATA_OWNER_PRIVATE_KEY || "")
+  .trim()
+  .replace(/^['"]+|['"]+$/g, "");
 
 function resolveOwnerAddressFromPrivateKey() {
   if (!OWNER_PRIVATE_KEY) {
