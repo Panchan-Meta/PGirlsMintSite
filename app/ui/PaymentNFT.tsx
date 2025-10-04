@@ -639,15 +639,40 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     if (!activePrice) return "No Price";
     if (isOwner) return "Owner Wallet";
     return "Mint";
+  }, [
+    minting,
+    provider,
+    account,
+    normalizedNftAddress,
+    contractStatus,
+    isSoldOut,
+    mintStatus,
+    activePrice,
+    isOwner,
+  ]);
 
   const isDisabled = useMemo(
     () =>
       minting ||
       !provider ||
       !account ||
+      !normalizedNftAddress ||
+      contractStatus !== "ready" ||
       mintStatus !== LISTED_STATUS ||
       !activePrice ||
       isSoldOut ||
+      isOwner,
+    [
+      minting,
+      provider,
+      account,
+      normalizedNftAddress,
+      contractStatus,
+      mintStatus,
+      activePrice,
+      isSoldOut,
+      isOwner,
+    ]
   );
 
   return (
