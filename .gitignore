@@ -23,8 +23,7 @@ deployments/
 ignition/
 
 # --- Project specific ---
-# メタデータはコミットしない
-metadata/
+
 !app/api/metadata/
 !app/api/metadata/**
 !app/api/updateListing/
