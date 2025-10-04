@@ -44,11 +44,16 @@ const FACTORY_RAW = process.env.CREATE2_DEPLOYER
   || process.env.FACTORY
   || process.env.NEXT_PUBLIC_FACTORY;
 
-const OWNER_RAW = process.env.NFT_OWNER
-  || process.env.NEXT_PUBLIC_NFT_OWNER
-  || process.env.TREASURY_ADDRESS     // ← よく使われる別名を許容
-  || process.env.OWNER
-  || process.env.OWNER_ADDRESS;
+const OWNER_ENV_KEYS = [
+  "NFT_OWNER",
+  "NEXT_PUBLIC_NFT_OWNER",
+  "TREASURY_ADDRESS",
+  "OWNER",
+  "OWNER_ADDRESS",
+];
+
+const ownerEnvKey = OWNER_ENV_KEYS.find((key) => typeof process.env[key] === "string" && process.env[key].trim() !== "");
+const OWNER_RAW = ownerEnvKey ? process.env[ownerEnvKey] : undefined;
 
 const RPC_URL     = process.env.RPC_URL;
 const PRIVATE_KEY = process.env.PRIVATE_KEY || "";
@@ -126,6 +131,40 @@ function listImagesRecursive(dir, baseDir) {
 }
 const readJsonSafe = (p) => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return null; } };
 
+function listJsonRecursive(dir, baseDir) {
+  const out = [];
+  if (!fs.existsSync(dir)) return out;
+  for (const ent of fs.readdirSync(dir, { withFileTypes:true })) {
+    const abs = path.join(dir, ent.name);
+    if (ent.isDirectory()) {
+      out.push(...listJsonRecursive(abs, baseDir));
+    } else if (ent.isFile() && /\.json$/i.test(ent.name)) {
+      const rel = path.relative(baseDir, abs).replace(/\\/g, "/");
+      out.push(rel);
+    }
+  }
+  out.sort((a,b)=>a.localeCompare(b, undefined, { numeric:true, sensitivity:"base" }));
+  return out;
+}
+
+const normaliseTokenId = (meta, jsonRel) => {
+  const candidates = [
+    meta?.tokenId,
+    meta?.index,
+    meta?.number,
+    meta?.number_padded,
+    path.basename(jsonRel || "", ".json"),
+  ];
+  for (const cand of candidates) {
+    if (typeof cand === "number" && Number.isFinite(cand) && cand > 0) return Number(cand);
+    if (typeof cand === "string" && cand.trim()) {
+      const parsed = Number(cand.replace(/^0+/, "")) || Number(cand);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+  }
+  return 0;
+};
+
 const baseDefaultsFor = (collectionName) => ({
   price: defaultPriceFor(collectionName),
   soldout: false,
@@ -170,6 +209,14 @@ async function genOneCollection(provider, collectionName, allRows) {
       ': "${CREATE2_DEPLOYER:?Missing CREATE2_DEPLOYER}"',
       ': "${RPC_URL:?Missing RPC_URL}"',
       ': "${PRIVATE_KEY:?Missing PRIVATE_KEY}"',
+      'OWNER_ADDRESS=${NFT_OWNER:-${NEXT_PUBLIC_NFT_OWNER:-${TREASURY_ADDRESS:-${OWNER:-${OWNER_ADDRESS:-}}}}}',
+      ': "${OWNER_ADDRESS:?Missing owner address (NFT_OWNER/NEXT_PUBLIC_NFT_OWNER/TREASURY_ADDRESS/OWNER/OWNER_ADDRESS)}"',
+      `EXPECTED_OWNER="${OWNER}"`,
+      'EXPECTED_OWNER_LC=$(printf "%s" "$EXPECTED_OWNER" | tr "[:upper:]" "[:lower:]")',
+      'OWNER_ADDRESS_LC=$(printf "%s" "$OWNER_ADDRESS" | tr "[:upper:]" "[:lower:]")',
+      'if [ "$OWNER_ADDRESS_LC" != "$EXPECTED_OWNER_LC" ]; then',
+      '  echo "[warn] OWNER_ADDRESS と metadata owner が一致しません: $OWNER_ADDRESS vs $EXPECTED_OWNER" >&2',
+      'fi',
       '',
       '# EIP-1559 非対応ノード向けの既定値',
       'CAST_FLAGS=${CAST_FLAGS:---legacy}',
@@ -185,27 +232,82 @@ async function genOneCollection(provider, collectionName, allRows) {
   /** @type {Array<Record<string,string>>} */
   const rows = [];
   console.log(`\n=== ${collectionName} (${imgs.length} images) ===`);
-  let tokenCounter = 0;
+
+  const existingMetaDir = path.join(SITE_META_DIR, collectionName);
+  const existingJsonRels = listJsonRecursive(existingMetaDir, existingMetaDir);
+  /** @type {Map<string,{data:Record<string,any>,jsonRel:string,abs:string}>} */
+  const existingMetaByImage = new Map();
+  let highestTokenId = 0;
+  for (const rel of existingJsonRels) {
+    const abs = path.join(existingMetaDir, rel);
+    const data = readJsonSafe(abs);
+    if (!data) continue;
+    const tokenId = normaliseTokenId(data, rel);
+    if (tokenId > highestTokenId) highestTokenId = tokenId;
+    const imgUrl = typeof data.image === "string" ? data.image : undefined;
+    if (imgUrl) {
+      existingMetaByImage.set(imgUrl, { data, jsonRel: rel, abs });
+    }
+  }
+
+  let tokenCounter = highestTokenId;
 
   for (const imageRel of imgs) {
+    const subdir   = path.dirname(imageRel).replace(/^\.$/, "");
+    const imageUrl = `${PUBLIC_BASE_URL}/assets/${encodedCat}/${encPath(imageRel)}`;
+    const existing = existingMetaByImage.get(imageUrl);
+
+    if (existing) {
+      const defaults = baseDefaultsFor(collectionName);
+      const finalMeta = existing.data || {};
+      const tokenId = normaliseTokenId(finalMeta, existing.jsonRel) || existingMetaByImage.size;
+      if (tokenId > tokenCounter) tokenCounter = tokenId;
+      const baseNum = padLeft(tokenId, PAD);
+      const jsonRel = existing.jsonRel;
+      const tokenURI = finalMeta.tokenURI
+        || `${METADATA_BASE_URL}/${encodedCat}/${encPath(jsonRel)}`;
+      const finalPrice =
+        typeof finalMeta.price === "undefined" || finalMeta.price === null || finalMeta.price === ""
+          ? defaults.price
+          : String(finalMeta.price);
+      const finalSoldout = typeof finalMeta.soldout === "boolean"
+        ? finalMeta.soldout
+        : typeof finalMeta.soldout === "string"
+          ? finalMeta.soldout.toLowerCase() === "true"
+          : Boolean(
+              typeof finalMeta.soldout === "number"
+                ? finalMeta.soldout
+                : finalMeta.soldout ?? defaults.soldout
+            );
+      const row = {
+        collection: collectionName,
+        index: String(tokenId),
+        number_padded: baseNum,
+        name: finalMeta.name || `${NAME_PREFIX}${tokenId}`,
+        tokenURI,
+        image: finalMeta.image || imageUrl,
+        contractAddress: finalMeta.contractAddress || predictedCollection,
+        fileName: finalMeta.fileName || jsonRel,
+        price: String(finalPrice),
+        soldout: finalSoldout,
+        tokenId: String(tokenId),
+      };
+      rows.push(row);
+      console.log(`#${baseNum} (existing): ${predictedCollection}   ${imageRel}`);
+      continue;
+    }
+
     tokenCounter += 1;
     const baseNum  = padLeft(tokenCounter, PAD);   // 001, 002, ...
     const name     = `${NAME_PREFIX}${tokenCounter}`;
-
-    const subdir   = path.dirname(imageRel).replace(/^\.$/, "");
     const jsonRel  = (subdir ? subdir + "/" : "") + `${baseNum}.json`;
-
-    const imageUrl = `${PUBLIC_BASE_URL}/assets/${encodedCat}/${encPath(imageRel)}`;
     const tokenURI = `${METADATA_BASE_URL}/${encodedCat}/${encPath(jsonRel)}`;
 
     const jsonAbs = path.join(collectionMetaDir, jsonRel);
     const jsonDir = path.dirname(jsonAbs);
     if (!DRY_RUN) fs.mkdirSync(jsonDir, { recursive: true });
 
-    const existing = fs.existsSync(jsonAbs) ? readJsonSafe(jsonAbs) : null;
-
-    // 新規生成：contractAddress は全てコレクションの predicted、tokenId は連番
-    if ((!existing) && !DRY_RUN) {
+    if (!DRY_RUN) {
       const defaults = baseDefaultsFor(collectionName);
       const meta = {
         name,
@@ -223,25 +325,13 @@ async function genOneCollection(provider, collectionName, allRows) {
         walletAddress: OWNER,
         category: collectionName,
         fileName: jsonRel,
+        tokenURI,
       };
       fs.writeFileSync(jsonAbs, JSON.stringify(meta, null, 2), "utf8");
     }
 
     const defaults = baseDefaultsFor(collectionName);
-    const finalMeta = readJsonSafe(jsonAbs) || {};
-    const finalPrice =
-      typeof finalMeta.price === "undefined" || finalMeta.price === null || finalMeta.price === ""
-        ? defaults.price
-        : String(finalMeta.price);
-    const finalSoldout = typeof finalMeta.soldout === "boolean"
-      ? finalMeta.soldout
-      : typeof finalMeta.soldout === "string"
-        ? finalMeta.soldout.toLowerCase() === "true"
-        : Boolean(
-            typeof finalMeta.soldout === "number"
-              ? finalMeta.soldout
-              : finalMeta.soldout ?? defaults.soldout
-          );
+    const priceForRow = defaults.price;
     const row = {
       collection: collectionName,
       index: String(tokenCounter),
@@ -251,8 +341,8 @@ async function genOneCollection(provider, collectionName, allRows) {
       image: imageUrl,
       contractAddress: predictedCollection,
       fileName: jsonRel,
-      price: String(finalPrice),
-      soldout: finalSoldout,
+      price: String(priceForRow),
+      soldout: defaults.soldout,
       tokenId: String(tokenCounter),
     };
     rows.push(row);
