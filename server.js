@@ -9,7 +9,8 @@ import { dirname } from "path";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const port = process.env.PORT || 3000;
+const requestedPort = Number(process.env.PORT) || 3000;
+const host = process.env.HOST || "0.0.0.0";
 const dev = process.env.NODE_ENV !== "production";
 const app = next({ dev });
 const handle = app.getRequestHandler();
@@ -29,7 +30,7 @@ function ensureMintStatus(data, filePath) {
   return data;
 }
 
-app.prepare().then(() => {
+app.prepare().then(async () => {
   const server = express();
   server.use(express.json());
 
@@ -150,7 +151,50 @@ app.prepare().then(() => {
   // Next.js ルーティング
   server.all("/*", (req, res) => handle(req, res));
 
-  server.listen(port, () => {
-    console.log(`> Ready on http://localhost:${port}`);
-  });
+  const startServerWithFallback = async (startPort) => {
+    let port = startPort;
+    // Cap retries to prevent infinite loops if ports are continuously occupied.
+    const maxAttempts = 20;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      try {
+        await new Promise((resolve, reject) => {
+          const onError = (error) => {
+            server.off("listening", onListening);
+            reject(error);
+          };
+
+          const onListening = () => {
+            server.off("error", onError);
+            resolve();
+          };
+
+          server.once("error", onError);
+          server.once("listening", onListening);
+          server.listen(port, host);
+        });
+        return port;
+      } catch (error) {
+        if (error.code !== "EADDRINUSE") {
+          throw error;
+        }
+
+        console.warn(
+          `Port ${port} is in use. Attempting to listen on port ${port + 1}.`
+        );
+        port += 1;
+      }
+    }
+
+    throw new Error(
+      `Unable to find an available port after ${maxAttempts} attempts starting from ${startPort}.`
+    );
+  };
+
+  try {
+    const port = await startServerWithFallback(requestedPort);
+    console.log(`> Ready on http://${host}:${port}`);
+  } catch (error) {
+    console.error("Failed to start server", error);
+    process.exit(1);
+  }
 });
