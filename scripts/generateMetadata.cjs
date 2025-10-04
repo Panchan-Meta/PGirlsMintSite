@@ -5,7 +5,9 @@ const { Wallet } = require("ethers");
 const ASSETS_DIR = path.join(__dirname, "../public/assets");
 const OUTPUT_DIR = path.join(__dirname, "../metadata");
 const BASE_URL = "https://mint.rahabpunkaholicgirls.com/assets";
-const OWNER_PRIVATE_KEY = (process.env.METADATA_OWNER_PRIVATE_KEY || "")
+const OWNER_PRIVATE_KEY = (
+  process.env.OWNER_PRIVATE_KEY || process.env.METADATA_OWNER_PRIVATE_KEY || ""
+)
   .trim()
   .replace(/^['"]+|['"]+$/g, "");
 
@@ -30,7 +32,7 @@ const DEFAULT_OWNER_ADDRESS = resolveOwnerAddressFromPrivateKey();
 
 if (!DEFAULT_OWNER_ADDRESS) {
   console.error(
-    "[metadata] METADATA_OWNER_PRIVATE_KEY is missing or invalid. Unable to derive owner address."
+    "[metadata] OWNER_PRIVATE_KEY (or METADATA_OWNER_PRIVATE_KEY) is missing or invalid. Unable to derive owner address."
   );
   process.exit(1);
 }
