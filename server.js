@@ -65,7 +65,6 @@ app.prepare().then(() => {
   // body: { category: string, fileName: string, mintStatus?: string, price?: string }
   server.post("/api/updateListing", (req, res) => {
     try {
-
       if (!category || !fileName) {
         res.status(400).json({ error: "category and fileName are required" });
         return;

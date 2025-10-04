@@ -145,7 +145,6 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   const [listPriceInput, setListPriceInput] = useState<string>(price);
   const [updatingListing, setUpdatingListing] = useState<boolean>(false);
 
-
   useEffect(() => {
     setMintStatus(initialMintStatus || "BeforeList");
   }, [initialMintStatus]);
@@ -179,7 +178,9 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         if (addr && typeof addr === "string" && addr !== ethers.ZeroAddress) {
           setErc20FromChain(addr);
         }
-      } catch {}
+      } catch (err) {
+        console.error(err);
+      }
     })();
   }, [provider, nftContractAddr]);
 
@@ -202,16 +203,21 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       try {
         const next: bigint = await nftRO.nextTokenId();
         if (tokenId < next) sold = true;
-      } catch {}
+      } catch (err) {
+        console.error(err);
+      }
 
       if (!sold) {
         try {
           await nftRO.ownerOf(tokenId);
           sold = true;
-        } catch {}
+        } catch (err) {
+          console.error(err);
+        }
       }
       setIsSoldOut(sold);
-    } catch {
+    } catch (err) {
+      console.error(err);
       // keep previous
     }
   }, [
@@ -230,7 +236,8 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         await window.ethereum?.request?.({ method: "eth_requestAccounts" });
         const s = await provider.getSigner();
         setAccount(await s.getAddress());
-      } catch {
+      } catch (err) {
+        console.error(err);
         setAccount("");
       } finally {
         checkSoldOut();
@@ -246,10 +253,16 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         if (!provider || !account || !tokenAddr) return;
         const erc20r = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, provider);
         let decimals = 18;
-        try { decimals = Number(await erc20r.decimals()); } catch {}
+        try {
+          decimals = Number(await erc20r.decimals());
+        } catch (decimalsErr) {
+          console.error(decimalsErr);
+        }
         const raw = await erc20r.balanceOf(account);
         setBalance(ethers.formatUnits(raw, decimals));
-      } catch {}
+      } catch (balanceErr) {
+        console.error(balanceErr);
+      }
     })();
   }, [provider, account, erc20FromChain, erc20Address]);
 
@@ -270,7 +283,9 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       let decimals = 18;
       try {
         decimals = Number(await erc20.decimals());
-      } catch {}
+      } catch (err) {
+        console.error(err);
+      }
 
       const priceValue = (activePrice || "").trim();
       if (!priceValue) {
@@ -302,10 +317,14 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       // 残高更新
       try {
         const erc20r = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, provider);
-        let d = 18; try { d = Number(await erc20r.decimals()); } catch {}
+        let d = 18;
+        try {
+          d = Number(await erc20r.decimals());
+        } catch (err) {
+          console.error(err);
+        }
         const raw = await erc20r.balanceOf(ownerAddr);
         setBalance(ethers.formatUnits(raw, d));
-      } catch {}
 
       // ---- メタデータ側にも soldout を反映（フォールバック） ----
       try {
@@ -375,8 +394,6 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       <p style={{ fontSize: "0.85rem", color: "#aaa" }}>
         Your PGirls balance (on-chain): {balance || "-"}
       </p>
-
-
 
       {!isSoldOut && (
         <div
