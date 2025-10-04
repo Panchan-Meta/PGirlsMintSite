@@ -3,13 +3,14 @@ import express from "express";
 import next from "next";
 import fs from "fs";
 import path from "path";
+import net from "net";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const port = process.env.PORT || 3000;
+const requestedPort = Number(process.env.PORT) || 3000;
 const dev = process.env.NODE_ENV !== "production";
 const app = next({ dev });
 const handle = app.getRequestHandler();
@@ -29,7 +30,35 @@ function ensureMintStatus(data, filePath) {
   return data;
 }
 
-app.prepare().then(() => {
+function checkPortAvailability(port, host = "0.0.0.0") {
+  return new Promise((resolve, reject) => {
+    const tester = net
+      .createServer()
+      .once("error", (err) => {
+        if (err.code === "EADDRINUSE") {
+          resolve(false);
+        } else {
+          reject(err);
+        }
+      })
+      .once("listening", () => {
+        tester
+          .once("close", () => resolve(true))
+          .close();
+      })
+      .listen(port, host);
+  });
+}
+
+async function findAvailablePort(startPort, host = "0.0.0.0") {
+  let port = startPort;
+  while (!(await checkPortAvailability(port, host))) {
+    port += 1;
+  }
+  return port;
+}
+
+app.prepare().then(async () => {
   const server = express();
   server.use(express.json());
 
@@ -150,7 +179,18 @@ app.prepare().then(() => {
   // Next.js ルーティング
   server.all("/*", (req, res) => handle(req, res));
 
-  server.listen(port, () => {
-    console.log(`> Ready on http://localhost:${port}`);
-  });
+  try {
+    const port = await findAvailablePort(requestedPort);
+    if (port !== requestedPort) {
+      console.warn(
+        `Port ${requestedPort} is in use. Falling back to available port ${port}.`
+      );
+    }
+    server.listen(port, () => {
+      console.log(`> Ready on http://localhost:${port}`);
+    });
+  } catch (error) {
+    console.error("Failed to start server", error);
+    process.exit(1);
+  }
 });
