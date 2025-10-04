@@ -3,9 +3,12 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract PGirlsNFT is ERC721URIStorage, Ownable {
+    using SafeERC20 for IERC20;
+
     IERC20 public pgirlsToken;
     address public treasury;
     uint256 public nextTokenId;
@@ -21,10 +24,7 @@ contract PGirlsNFT is ERC721URIStorage, Ownable {
     }
 
     function mint(uint256 price, string memory tokenURI) public {
-        require(
-            pgirlsToken.transferFrom(msg.sender, treasury, price),
-            "Payment failed"
-        );
+        pgirlsToken.safeTransferFrom(msg.sender, treasury, price);
 
         uint256 tokenId = nextTokenId;
         _safeMint(msg.sender, tokenId);
