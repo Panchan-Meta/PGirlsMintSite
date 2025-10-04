@@ -157,9 +157,7 @@ function getFriendlyErrorMessage(error: any): string {
   if (!raw) return "Mint failed";
 
   const normalized = raw.toLowerCase();
-  if (normalized.includes("could not decode result data")) {
-    return "NFTコントラクトの呼び出しに失敗しました。コントラクトアドレスとデプロイ状況を確認してください。";
-  }
+
   const matchesInsufficient = INSUFFICIENT_BALANCE_PATTERNS.some((pattern) =>
     normalized.includes(pattern)
   );
@@ -641,17 +639,6 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     if (!activePrice) return "No Price";
     if (isOwner) return "Owner Wallet";
     return "Mint";
-  }, [
-    minting,
-    provider,
-    account,
-    normalizedNftAddress,
-    contractStatus,
-    isSoldOut,
-    mintStatus,
-    activePrice,
-    isOwner,
-  ]);
 
   const isDisabled = useMemo(
     () =>
@@ -661,20 +648,6 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       mintStatus !== LISTED_STATUS ||
       !activePrice ||
       isSoldOut ||
-      isOwner ||
-      !normalizedNftAddress ||
-      contractStatus !== "ready",
-    [
-      minting,
-      provider,
-      account,
-      mintStatus,
-      activePrice,
-      isSoldOut,
-      isOwner,
-      normalizedNftAddress,
-      contractStatus,
-    ]
   );
 
   return (
