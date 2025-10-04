@@ -24,11 +24,7 @@ const getContractAddress = (metadata: unknown): string => {
   ];
 
   for (const candidate of potential) {
-    if (typeof candidate === "string" && candidate.trim().length > 0) {
-      try {
-        return ethers.getAddress(candidate);
-      } catch {
-        return candidate.trim();
+    
       }
     }
   }
