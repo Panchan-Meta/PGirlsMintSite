@@ -23,7 +23,7 @@ deployments/
 ignition/
 
 # --- Project specific ---
-# API route implementations remain tracked
+
 !app/api/metadata/
 !app/api/metadata/**
 !app/api/updateListing/
