@@ -4,6 +4,7 @@ const path = require("path");
 const ASSETS_DIR = path.join(__dirname, "../public/assets");
 const OUTPUT_DIR = path.join(__dirname, "../metadata");
 const BASE_URL = "https://mint.rahabpunkaholicgirls.com/assets";
+const DEFAULT_OWNER_ADDRESS = (process.env.METADATA_OWNER_ADDRESS || "").trim();
 
 let tokenId = 1;
 
@@ -17,29 +18,30 @@ function createMetadata(category, fileName, tokenId) {
     image: isVideo ? undefined : fileUrl,
     animation_url: isVideo ? fileUrl : undefined,
     price: "1.5",
+    ownerAddress: DEFAULT_OWNER_ADDRESS,
     attributes: [
       {
         trait_type: "Category",
-        value: category // ? Å© ÉTÉuÉfÉBÉåÉNÉgÉäñºÇîΩâf
+        value: category,
       },
       {
         trait_type: "Rarity",
-        value: "Normal"
-      }
-    ]
+        value: "Normal",
+      },
+    ],
   };
 }
 
 function generate() {
   if (!fs.existsSync(OUTPUT_DIR)) {
-    fs.mkdirSync(OUTPUT_DIR);
+    fs.mkdirSync(OUTPUT_DIR, { recursive: true });
   }
 
-  const categories = fs.readdirSync(ASSETS_DIR).filter(folder =>
-    fs.statSync(path.join(ASSETS_DIR, folder)).isDirectory()
-  );
+  const categories = fs
+    .readdirSync(ASSETS_DIR)
+    .filter((folder) => fs.statSync(path.join(ASSETS_DIR, folder)).isDirectory());
 
-  categories.forEach(category => {
+  categories.forEach((category) => {
     const categoryPath = path.join(ASSETS_DIR, category);
     const outputCategoryDir = path.join(OUTPUT_DIR, category);
 
@@ -47,17 +49,17 @@ function generate() {
       fs.mkdirSync(outputCategoryDir, { recursive: true });
     }
 
-    const mediaFiles = fs.readdirSync(categoryPath).filter(file =>
-      /\.(png|jpg|jpeg|mp4)$/i.test(file)
-    );
+    const mediaFiles = fs
+      .readdirSync(categoryPath)
+      .filter((file) => /\.(png|jpg|jpeg|mp4)$/i.test(file));
 
-    mediaFiles.forEach(file => {
+    mediaFiles.forEach((file) => {
       const metadata = createMetadata(category, file, tokenId);
       const paddedId = String(tokenId).padStart(3, "0");
       const metadataPath = path.join(outputCategoryDir, `${paddedId}.json`);
       fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
-      console.log(`? [${category}] Metadata #${tokenId} Å® ${metadataPath}`);
-      tokenId++;
+      console.log(`‚úî [${category}] Metadata #${tokenId} ${metadataPath}`);
+      tokenId += 1;
     });
   });
 }

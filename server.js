@@ -65,6 +65,13 @@ app.prepare().then(() => {
   // body: { category: string, fileName: string, mintStatus?: string, price?: string }
   server.post("/api/updateListing", (req, res) => {
     try {
+      const {
+        category,
+        fileName,
+        mintStatus,
+        price,
+        ownerAddress,
+      } = req.body || {};
       if (!category || !fileName) {
         res.status(400).json({ error: "category and fileName are required" });
         return;
@@ -88,6 +95,20 @@ app.prepare().then(() => {
           data.price = trimmed;
         } else {
           delete data.price;
+        }
+      }
+
+      if (typeof ownerAddress !== "undefined") {
+        const trimmedOwner =
+          typeof ownerAddress === "string" ? ownerAddress.trim() : "";
+        if (trimmedOwner) {
+          data.ownerAddress = trimmedOwner;
+          data.owner = trimmedOwner;
+          data.walletAddress = trimmedOwner;
+        } else {
+          delete data.ownerAddress;
+          delete data.owner;
+          delete data.walletAddress;
         }
       }
 

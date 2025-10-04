@@ -138,12 +138,19 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   const [isSoldOut, setIsSoldOut] = useState<boolean>(!!initialSoldout);
   const [erc20FromChain, setErc20FromChain] = useState<string>("");
   const [balance, setBalance] = useState<string>("");
+  const [currentOwnerAddress, setCurrentOwnerAddress] = useState<string>(
+    ownerAddress?.trim() ?? ""
+  );
   const [mintStatus, setMintStatus] = useState<string>(
     initialMintStatus || "BeforeList"
   );
   const [activePrice, setActivePrice] = useState<string>(price);
   const [listPriceInput, setListPriceInput] = useState<string>(price);
   const [updatingListing, setUpdatingListing] = useState<boolean>(false);
+
+  useEffect(() => {
+    setCurrentOwnerAddress(ownerAddress?.trim() ?? "");
+  }, [ownerAddress]);
 
   useEffect(() => {
     setMintStatus(initialMintStatus || "BeforeList");
@@ -266,6 +273,13 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     })();
   }, [provider, account, erc20FromChain, erc20Address]);
 
+  const getOwnerFromMetadata = useCallback((metadata: any) => {
+    if (!metadata || typeof metadata !== "object") return "";
+    const candidate =
+      metadata.ownerAddress || metadata.owner || metadata.walletAddress || "";
+    return typeof candidate === "string" ? candidate.trim() : "";
+  }, []);
+
   /** ---------- Mint ---------- */
   const handleMint = useCallback(async () => {
     if (minting || isSoldOut || mintStatus !== "Listed") return;
@@ -294,6 +308,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
 
       const parsedPrice = ethers.parseUnits(priceValue, decimals);
       const ownerAddr = await signer.getAddress();
+      const normalizedOwnerAddr = ownerAddr.trim();
 
       const allowance: bigint = await erc20.allowance(ownerAddr, nftContractAddr);
       if (allowance < parsedPrice) {
@@ -313,6 +328,9 @@ export default function PaymentNFT(props: PaymentNFTProps) {
 
       // ★ 即時反映：UI上で初期状態に戻す
       setIsSoldOut(false);
+      if (normalizedOwnerAddr) {
+        setCurrentOwnerAddress(normalizedOwnerAddr);
+      }
 
       // 残高更新
       try {
@@ -339,11 +357,17 @@ export default function PaymentNFT(props: PaymentNFTProps) {
             fileName,
             mintStatus: "BeforeList",
             price: "",
+            ownerAddress: normalizedOwnerAddr,
           }),
         });
+        const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
-          const body = await response.json().catch(() => ({}));
-          throw new Error(body.error || "Failed to reset listing");
+          throw new Error(payload.error || "Failed to reset listing");
+        }
+        const metadata = (payload as any)?.metadata ?? {};
+        const ownerFromMetadata = getOwnerFromMetadata(metadata);
+        if (ownerFromMetadata) {
+          setCurrentOwnerAddress(ownerFromMetadata);
         }
       } catch (err) {
         console.error(err);
@@ -374,6 +398,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     fileName,
     mintStatus,
     checkSoldOut,
+    getOwnerFromMetadata,
   ]);
 
   const handlePriceChange = useCallback(
@@ -391,9 +416,11 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   );
 
   const isOwner = useMemo(() => {
-    if (!account || !ownerAddress) return false;
-    return account.trim().toLowerCase() === ownerAddress.trim().toLowerCase();
-  }, [account, ownerAddress]);
+    if (!account || !currentOwnerAddress) return false;
+    return (
+      account.trim().toLowerCase() === currentOwnerAddress.trim().toLowerCase()
+    );
+  }, [account, currentOwnerAddress]);
 
   const disableListingButton = useMemo(() => {
     if (updatingListing || !isOwner) return true;
@@ -445,10 +472,14 @@ export default function PaymentNFT(props: PaymentNFTProps) {
 
       const nextStatus = rawStatus ?? (willList ? "Listed" : "BeforeList");
       const nextPrice = rawPrice ?? (willList ? trimmed : "");
+      const nextOwner = getOwnerFromMetadata(metadata);
 
       setMintStatus(nextStatus);
       setActivePrice(nextPrice);
       setListPriceInput(nextPrice);
+      if (nextOwner) {
+        setCurrentOwnerAddress(nextOwner);
+      }
       if (!willList) {
         setIsSoldOut(false);
       }
@@ -464,6 +495,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     mintStatus,
     category,
     fileName,
+    getOwnerFromMetadata,
   ]);
 
   const displayButtonLabel = useMemo(() => {
@@ -493,6 +525,9 @@ export default function PaymentNFT(props: PaymentNFTProps) {
 
       <p style={{ fontSize: "0.9rem", color: "#ccc" }}>
         Price: {activePrice ? `${activePrice} PGirls` : "-"}
+      </p>
+      <p style={{ fontSize: "0.85rem", color: "#ccc" }}>
+        Owner Address: {currentOwnerAddress || "-"}
       </p>
       <p style={{ fontSize: "0.85rem", color: "#aaa" }}>
         Your PGirls balance (on-chain): {balance || "-"}
