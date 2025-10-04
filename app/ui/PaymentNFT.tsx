@@ -17,6 +17,8 @@ interface PaymentNFTProps {
   initialSoldout?: boolean;
   initialMintStatus?: string;
   ownerAddress?: string;
+  provider: ethers.BrowserProvider | null;
+  account: string;
 }
 
 declare global {
@@ -98,6 +100,9 @@ function AutoMedia({
 }
 
 /** ---------- Minimal ABIs ---------- */
+const DEFAULT_MINT_STATUS = "BeforeList";
+const LISTED_STATUS = "Listed";
+
 const NFT_ABI_MIN = [
   "function nextTokenId() view returns (uint256)",
   "function ownerOf(uint256 tokenId) view returns (address)",
@@ -117,6 +122,58 @@ const ERC20_ABI_MIN = [
   "function approve(address spender, uint256 amount) returns (bool)",
 ] as const;
 
+const INSUFFICIENT_BALANCE_PATTERNS = [
+  "insufficient balance",
+  "insufficient funds",
+  "transfer amount exceeds balance",
+  "exceeds balance",
+  "balance too low",
+];
+
+const ALLOWANCE_RESET_PATTERNS = [
+  "missing revert data",
+  "without a reason string",
+];
+
+function extractErrorMessage(error: any): string | undefined {
+  if (!error) return undefined;
+  if (typeof error === "string") return error;
+
+  const candidates = [
+    error?.reason,
+    error?.shortMessage,
+    error?.data?.message,
+    error?.error?.message,
+    error?.error?.data?.message,
+    error?.message,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+function getFriendlyErrorMessage(error: any): string {
+  const raw = extractErrorMessage(error);
+  if (!raw) return "Mint failed";
+
+  const normalized = raw.toLowerCase();
+
+  const matchesInsufficient = INSUFFICIENT_BALANCE_PATTERNS.some((pattern) =>
+    normalized.includes(pattern)
+  );
+
+  if (matchesInsufficient || error?.code === "INSUFFICIENT_FUNDS") {
+    return "Insufficient PGirls token balance (insufficient funds error).";
+  }
+
+  return raw;
+}
+
 export default function PaymentNFT(props: PaymentNFTProps) {
   const {
     nftContractAddr,
@@ -130,30 +187,57 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     initialSoldout,
     initialMintStatus,
     ownerAddress,
+    provider,
+    account,
   } = props;
 
-  const [account, setAccount] = useState<string>("");
   const [minting, setMinting] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [isSoldOut, setIsSoldOut] = useState<boolean>(!!initialSoldout);
-  const [erc20FromChain, setErc20FromChain] = useState<string>("");
+  const fallbackTokenAddress = useMemo(() => {
+    if (!erc20Address || typeof erc20Address !== "string") {
+      return "";
+    }
+    try {
+      return ethers.getAddress(erc20Address);
+    } catch (err) {
+      console.error("Invalid fallback ERC20 address", erc20Address, err);
+      return "";
+    }
+  }, [erc20Address]);
+  const [resolvedTokenAddress, setResolvedTokenAddress] = useState<string>("");
   const [balance, setBalance] = useState<string>("");
   const [currentOwnerAddress, setCurrentOwnerAddress] = useState<string>(
     ownerAddress?.trim() ?? ""
   );
   const [mintStatus, setMintStatus] = useState<string>(
-    initialMintStatus || "BeforeList"
+    initialMintStatus || DEFAULT_MINT_STATUS
   );
   const [activePrice, setActivePrice] = useState<string>(price);
   const [listPriceInput, setListPriceInput] = useState<string>(price);
   const [updatingListing, setUpdatingListing] = useState<boolean>(false);
+  const [contractStatus, setContractStatus] = useState<
+    "unknown" | "checking" | "ready" | "missing"
+  >("unknown");
+
+  const normalizedNftAddress = useMemo(() => {
+    if (!nftContractAddr || typeof nftContractAddr !== "string") {
+      return "";
+    }
+    try {
+      return ethers.getAddress(nftContractAddr);
+    } catch (err) {
+      console.error("Invalid NFT contract address", err);
+      return "";
+    }
+  }, [nftContractAddr]);
 
   useEffect(() => {
     setCurrentOwnerAddress(ownerAddress?.trim() ?? "");
   }, [ownerAddress]);
 
   useEffect(() => {
-    setMintStatus(initialMintStatus || "BeforeList");
+    setMintStatus(initialMintStatus || DEFAULT_MINT_STATUS);
   }, [initialMintStatus]);
 
   useEffect(() => {
@@ -165,36 +249,165 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     process.env.NEXT_PUBLIC_PGIRLSCHAIN_EXPLORER ||
     "https://explorer.rahabpunkaholicgirls.com";
 
-  const provider = useMemo(() => {
-    if (typeof window === "undefined" || !window.ethereum) return null;
-    return new ethers.BrowserProvider(window.ethereum);
-  }, []);
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        if (!normalizedNftAddress) {
+          if (!cancelled) {
+            setContractStatus("missing");
+          }
+          return;
+        }
+
+        if (!provider) {
+          if (!cancelled) {
+            setContractStatus("unknown");
+          }
+          return;
+        }
+
+        if (!cancelled) {
+          setContractStatus("checking");
+        }
+
+        const code = await provider.getCode(normalizedNftAddress);
+        if (cancelled) return;
+        if (code && code !== "0x") {
+          setContractStatus("ready");
+        } else {
+          setContractStatus("missing");
+        }
+      } catch (err) {
+        console.error(err);
+        if (!cancelled) {
+          setContractStatus("missing");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [provider, normalizedNftAddress]);
 
   const getSigner = useCallback(async () => {
     if (!provider) return null;
     return provider.getSigner();
   }, [provider]);
 
-  /** ---------- On-chain pgirlsToken address (SSoT) ---------- */
-  useEffect(() => {
-    (async () => {
+  const [tokenAddr, setTokenAddr] = useState<string>("");
+  const [tokenStatus, setTokenStatus] = useState<
+    "unknown" | "resolving" | "resolved" | "missing"
+  >("unknown");
+
+  const validateCandidate = useCallback(
+    async (candidate: string | undefined | null) => {
+      if (!candidate || typeof candidate !== "string") {
+        return "";
+      }
+
       try {
-        if (!provider || !nftContractAddr) return;
-        const nftRO = new ethers.Contract(nftContractAddr, NFT_ABI_MIN, provider);
-        const addr = await nftRO.pgirlsToken().catch(() => "");
-        if (addr && typeof addr === "string" && addr !== ethers.ZeroAddress) {
-          setErc20FromChain(addr);
+        const normalized = ethers.getAddress(candidate);
+        if (!provider) {
+          return normalized;
+        }
+
+        try {
+          const code = await provider.getCode(normalized);
+          if (code && code !== "0x") {
+            return normalized;
+          }
+          console.warn(
+            "Resolved PGirls token candidate has no contract code",
+            normalized
+          );
+        } catch (codeErr) {
+          console.error("Failed to validate ERC20 candidate", normalized, codeErr);
         }
       } catch (err) {
-        console.error(err);
+        console.error("Invalid ERC20 candidate", candidate, err);
+      }
+
+      return "";
+    },
+    [provider]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      if (!cancelled) {
+        setTokenStatus("resolving");
+      }
+      const resolved = await validateCandidate(resolvedTokenAddress);
+      if (!cancelled && resolved) {
+        setTokenAddr(resolved);
+        setTokenStatus("resolved");
+        return;
+      }
+
+      const fallback = await validateCandidate(fallbackTokenAddress);
+      if (!cancelled && fallback) {
+        if (fallback !== resolvedTokenAddress) {
+          setResolvedTokenAddress(fallback);
+        }
+        setTokenAddr(fallback);
+        setTokenStatus("resolved");
+        return;
+      }
+
+      if (!provider || !normalizedNftAddress) {
+        if (!cancelled) {
+          setTokenAddr("");
+          setTokenStatus(fallbackTokenAddress ? "resolving" : "missing");
+        }
+        return;
+      }
+
+      try {
+        const nftRO = new ethers.Contract(
+          normalizedNftAddress,
+          NFT_ABI_MIN,
+          provider
+        );
+        const onChainRaw = await nftRO.pgirlsToken().catch(() => "");
+        const onChain = await validateCandidate(onChainRaw);
+        if (!cancelled && onChain) {
+          if (onChain !== resolvedTokenAddress) {
+            setResolvedTokenAddress(onChain);
+          }
+          setTokenAddr(onChain);
+          setTokenStatus("resolved");
+          return;
+        }
+      } catch (err) {
+        console.error("Failed to resolve ERC20 via NFT", err);
+      }
+
+      if (!cancelled) {
+        setTokenAddr("");
+        setTokenStatus("missing");
       }
     })();
-  }, [provider, nftContractAddr]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    validateCandidate,
+    resolvedTokenAddress,
+    fallbackTokenAddress,
+    provider,
+    normalizedNftAddress,
+  ]);
 
   /** ---------- On-chain + Off-chain soldout check ---------- */
   const checkSoldOut = useCallback(async () => {
     try {
-      if (mintStatus !== "Listed") {
+      if (mintStatus !== LISTED_STATUS) {
         setIsSoldOut(false);
         return;
       }
@@ -203,8 +416,18 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         setIsSoldOut(true);
         return;
       }
-      if (!provider || !nftContractAddr || !tokenId) return;
-      const nftRO = new ethers.Contract(nftContractAddr, NFT_ABI_MIN, provider);
+      if (
+        !provider ||
+        !normalizedNftAddress ||
+        !tokenId ||
+        contractStatus !== "ready"
+      )
+        return;
+      const nftRO = new ethers.Contract(
+        normalizedNftAddress,
+        NFT_ABI_MIN,
+        provider
+      );
 
       let sold = false;
       try {
@@ -229,34 +452,22 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     }
   }, [
     provider,
-    nftContractAddr,
+    normalizedNftAddress,
     tokenId,
     initialSoldout,
     mintStatus,
+    contractStatus,
   ]);
 
-  /** 初期化：アカウント取得 & soldout チェック */
   useEffect(() => {
-    (async () => {
-      if (!provider) return;
-      try {
-        await window.ethereum?.request?.({ method: "eth_requestAccounts" });
-        const s = await provider.getSigner();
-        setAccount(await s.getAddress());
-      } catch (err) {
-        console.error(err);
-        setAccount("");
-      } finally {
-        checkSoldOut();
-      }
-    })();
-  }, [provider, checkSoldOut]);
+    checkSoldOut();
+  }, [checkSoldOut]);
 
   /** 残高の読み取り（アカウント/トークン変更時） */
   useEffect(() => {
     (async () => {
       try {
-        const tokenAddr = erc20FromChain || erc20Address;
+
         if (!provider || !account || !tokenAddr) return;
         const erc20r = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, provider);
         let decimals = 18;
@@ -271,7 +482,13 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         console.error(balanceErr);
       }
     })();
-  }, [provider, account, erc20FromChain, erc20Address]);
+  }, [provider, account, tokenAddr]);
+
+  useEffect(() => {
+    if (!account) {
+      setBalance("");
+    }
+  }, [account]);
 
   const getOwnerFromMetadata = useCallback((metadata: any) => {
     if (!metadata || typeof metadata !== "object") return "";
@@ -281,16 +498,28 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   }, []);
 
   /** ---------- Mint ---------- */
+  const isOwner = useMemo(() => {
+    if (!account || !currentOwnerAddress) return false;
+    return (
+      account.trim().toLowerCase() === currentOwnerAddress.trim().toLowerCase()
+    );
+  }, [account, currentOwnerAddress]);
+
   const handleMint = useCallback(async () => {
-    if (minting || isSoldOut || mintStatus !== "Listed") return;
+    if (minting || isSoldOut || mintStatus !== LISTED_STATUS || isOwner) return;
     try {
       setMinting(true);
       setTxHash(null);
       if (!provider) throw new Error("No provider");
+      if (!normalizedNftAddress) {
+        throw new Error("NFT contract address is not set.");
+      }
+      if (contractStatus !== "ready") {
+        throw new Error("NFT contract deployment could not be confirmed.");
+      }
       const signer = await getSigner();
       if (!signer) throw new Error("No signer");
 
-      const tokenAddr = erc20FromChain || erc20Address;
       if (!tokenAddr) throw new Error("Missing PGirls token address");
 
       const erc20 = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, signer);
@@ -310,13 +539,47 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       const ownerAddr = await signer.getAddress();
       const normalizedOwnerAddr = ownerAddr.trim();
 
-      const allowance: bigint = await erc20.allowance(ownerAddr, nftContractAddr);
-      if (allowance < parsedPrice) {
-        const txApprove = await erc20.approve(nftContractAddr, parsedPrice);
-        await txApprove.wait();
+      const balanceRaw: bigint = await erc20.balanceOf(ownerAddr);
+      if (balanceRaw < parsedPrice) {
+        const requiredAmount = ethers.formatUnits(parsedPrice, decimals);
+        throw new Error(
+          `Insufficient PGirls token balance. Required amount: ${requiredAmount}`
+        );
       }
 
-      const nft = new ethers.Contract(nftContractAddr, NFT_ABI_WRITE, signer);
+      let allowance: bigint = await erc20.allowance(
+        ownerAddr,
+        normalizedNftAddress
+      );
+      if (allowance < parsedPrice) {
+        if (allowance > BigInt(0)) {
+          // Some ERC-20 contracts (e.g., USDT-style) require setting the allowance
+          // to zero before increasing it. Mobile wallets on Rahab return a
+          // "missing revert data" error otherwise.
+          const txReset = await erc20.approve(normalizedNftAddress, 0);
+          await txReset.wait();
+        }
+
+        const txApprove = await erc20.approve(
+          normalizedNftAddress,
+          parsedPrice
+        );
+        await txApprove.wait();
+
+        // Re-read allowance to ensure the approval actually succeeded before minting.
+        allowance = await erc20.allowance(ownerAddr, normalizedNftAddress);
+        if (allowance < parsedPrice) {
+          throw new Error(
+            "Approval transaction completed but allowance is still insufficient. Please retry."
+          );
+        }
+      }
+
+      const nft = new ethers.Contract(
+        normalizedNftAddress,
+        NFT_ABI_WRITE,
+        signer
+      );
 
       // 既存パターン: /metadata/<lang>/<paddedId>.json
       const paddedTokenId = tokenId.toString().padStart(3, "0");
@@ -355,7 +618,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
           body: JSON.stringify({
             category,
             fileName,
-            mintStatus: "BeforeList",
+            mintStatus: DEFAULT_MINT_STATUS,
             price: "",
             ownerAddress: normalizedOwnerAddr,
           }),
@@ -373,24 +636,23 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         console.error(err);
       }
 
-      setMintStatus("BeforeList");
+      setMintStatus(DEFAULT_MINT_STATUS);
       setActivePrice("");
       setListPriceInput("");
       await checkSoldOut();
     } catch (e: any) {
       console.error(e);
-      alert(e?.reason || e?.message || "Mint failed");
+      alert(getFriendlyErrorMessage(e));
     } finally {
       setMinting(false);
     }
   }, [
     minting,
     isSoldOut,
+    isOwner,
     provider,
     getSigner,
-    erc20Address,
-    erc20FromChain,
-    nftContractAddr,
+    normalizedNftAddress,
     activePrice,
     langStr,
     tokenId,
@@ -399,6 +661,8 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     mintStatus,
     checkSoldOut,
     getOwnerFromMetadata,
+    contractStatus,
+
   ]);
 
   const handlePriceChange = useCallback(
@@ -408,38 +672,37 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         .replace(/[^\d.]/g, "")
         .replace(/(\..*)\./g, "$1");
       setListPriceInput(sanitized);
-      if (mintStatus !== "Listed") {
+      if (mintStatus !== LISTED_STATUS) {
         setActivePrice(sanitized);
       }
     },
     [mintStatus]
   );
 
-  const isOwner = useMemo(() => {
-    if (!account || !currentOwnerAddress) return false;
-    return (
-      account.trim().toLowerCase() === currentOwnerAddress.trim().toLowerCase()
-    );
-  }, [account, currentOwnerAddress]);
+  const canList = useMemo(() => {
+    if (!isOwner) return false;
+    if (isSoldOut) return false;
+    return true;
+  }, [isOwner, isSoldOut]);
 
   const disableListingButton = useMemo(() => {
-    if (updatingListing || !isOwner) return true;
+    if (updatingListing || !canList) return true;
     const trimmed = listPriceInput.trim();
-    if (mintStatus === "Listed") {
-      return trimmed === (activePrice || "");
+    if (mintStatus !== LISTED_STATUS) {
+      return trimmed.length === 0;
     }
-    return trimmed.length === 0;
-  }, [updatingListing, isOwner, listPriceInput, mintStatus, activePrice]);
+    return false;
+  }, [updatingListing, canList, listPriceInput, mintStatus]);
 
   const handleListingUpdate = useCallback(async () => {
-    if (!isOwner) {
+    if (!canList) {
       alert("Only the owner can update the listing");
       return;
     }
 
     const trimmed = listPriceInput.trim();
     const willList = trimmed.length > 0;
-    if (!willList && mintStatus !== "Listed") {
+    if (!willList && mintStatus !== LISTED_STATUS) {
       return;
     }
 
@@ -451,7 +714,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         body: JSON.stringify({
           category,
           fileName,
-          mintStatus: willList ? "Listed" : "BeforeList",
+          mintStatus: willList ? LISTED_STATUS : DEFAULT_MINT_STATUS,
           price: trimmed,
         }),
       });
@@ -470,7 +733,8 @@ export default function PaymentNFT(props: PaymentNFTProps) {
           ? String(metadata.price)
           : undefined;
 
-      const nextStatus = rawStatus ?? (willList ? "Listed" : "BeforeList");
+      const nextStatus =
+        rawStatus ?? (willList ? LISTED_STATUS : DEFAULT_MINT_STATUS);
       const nextPrice = rawPrice ?? (willList ? trimmed : "");
       const nextOwner = getOwnerFromMetadata(metadata);
 
@@ -490,7 +754,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       setUpdatingListing(false);
     }
   }, [
-    isOwner,
+    canList,
     listPriceInput,
     mintStatus,
     category,
@@ -502,21 +766,53 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     if (minting) return "Processing...";
     if (!provider) return "Wallet Not Found";
     if (!account) return "Connect Wallet";
+    if (!normalizedNftAddress) return "Contract Missing";
+    if (contractStatus === "checking") return "Checking Contract";
+    if (contractStatus === "missing") return "Contract Unavailable";
+    if (tokenStatus === "resolving") return "Resolving Token";
+    if (tokenStatus === "missing") return "Token Unavailable";
     if (isSoldOut) return "Sold Out";
-    if (mintStatus !== "Listed") return "Not Listed";
+    if (mintStatus !== LISTED_STATUS) return "Not Listed";
     if (!activePrice) return "No Price";
+    if (isOwner) return "Owner Wallet";
     return "Mint";
-  }, [minting, provider, account, isSoldOut, mintStatus, activePrice]);
+    }, [
+      minting,
+      provider,
+      account,
+      normalizedNftAddress,
+      contractStatus,
+      tokenStatus,
+      isSoldOut,
+      mintStatus,
+      activePrice,
+      isOwner,
+    ]);
 
   const isDisabled = useMemo(
     () =>
       minting ||
       !provider ||
       !account ||
-      mintStatus !== "Listed" ||
+      !normalizedNftAddress ||
+      contractStatus !== "ready" ||
+      tokenStatus !== "resolved" ||
+      mintStatus !== LISTED_STATUS ||
       !activePrice ||
+      isSoldOut ||
+      isOwner,
+    [
+      minting,
+      provider,
+      account,
+      normalizedNftAddress,
+      contractStatus,
+      tokenStatus,
+      mintStatus,
+      activePrice,
       isSoldOut,
-    [minting, provider, account, mintStatus, activePrice, isSoldOut]
+      isOwner,
+    ]
   );
 
   return (
@@ -529,9 +825,52 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       <p style={{ fontSize: "0.85rem", color: "#ccc" }}>
         Owner Address: {currentOwnerAddress || "-"}
       </p>
-      <p style={{ fontSize: "0.85rem", color: "#aaa" }}>
-        Your PGirls balance (on-chain): {balance || "-"}
+      <p style={{ fontSize: "0.85rem", color: "#ccc" }}>
+        Connected Wallet: {account || "-"}
       </p>
+      {canList ? (
+        <p style={{ fontSize: "0.85rem", color: "#8ecbff" }}>
+          You own this NFT. PGirls balance: {balance || "0"}
+        </p>
+      ) : (
+        <p style={{ fontSize: "0.8rem", color: "#888" }}>
+          Connect the owner wallet to manage the listing.
+        </p>
+      )}
+
+      {!normalizedNftAddress && (
+        <p style={{ fontSize: "0.8rem", color: "#ff8080" }}>
+          The metadata does not include an NFT contract address.
+        </p>
+      )}
+      {normalizedNftAddress && provider && contractStatus === "checking" && (
+        <p style={{ fontSize: "0.8rem", color: "#8ecbff" }}>
+          Checking NFT contract...
+        </p>
+      )}
+      {normalizedNftAddress && provider && contractStatus === "missing" && (
+        <p style={{ fontSize: "0.8rem", color: "#ff8080" }}>
+          Could not detect the specified NFT contract. Please check the network
+          and address.
+        </p>
+      )}
+
+      {tokenStatus === "resolving" && (
+        <p style={{ fontSize: "0.8rem", color: "#8ecbff" }}>
+          Resolving PGirls token contract...
+        </p>
+      )}
+      {tokenStatus === "missing" && (
+        <p style={{ fontSize: "0.8rem", color: "#ff8080" }}>
+          Unable to determine the PGirls token contract. Please refresh after
+          verifying the metadata.
+        </p>
+      )}
+      {tokenStatus === "resolved" && tokenAddr && (
+        <p style={{ fontSize: "0.8rem", color: "#ccc" }}>
+          PGirls token: {tokenAddr}
+        </p>
+      )}
 
       {!isSoldOut && (
         <div
@@ -549,14 +888,17 @@ export default function PaymentNFT(props: PaymentNFTProps) {
             value={listPriceInput}
             onChange={handlePriceChange}
             placeholder="Enter price in PGirls"
+            disabled={!canList}
             style={{
               padding: "0.5rem",
               borderRadius: "6px",
               border: "1px solid #444",
-              background: "#111",
+              background: canList ? "#111" : "#1a1a1a",
               color: "#fff",
               width: "200px",
               textAlign: "center",
+              opacity: canList ? 1 : 0.5,
+              cursor: canList ? "text" : "not-allowed",
             }}
           />
           <button
@@ -573,7 +915,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
                 disableListingButton ? "not-allowed" : "pointer",
             }}
           >
-            {mintStatus === "Listed" ? "Update Listing" : "List for Sale"}
+            {mintStatus === LISTED_STATUS ? "Update Listing" : "List for Sale"}
           </button>
         </div>
       )}
