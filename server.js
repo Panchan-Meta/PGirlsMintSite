@@ -65,8 +65,6 @@ app.prepare().then(() => {
   // body: { category: string, fileName: string, mintStatus?: string, price?: string }
   server.post("/api/updateListing", (req, res) => {
     try {
-      const { category, fileName, mintStatus, price, ownerAddress } =
-        req.body || {};
       if (!category || !fileName) {
         res.status(400).json({ error: "category and fileName are required" });
         return;
@@ -93,12 +91,6 @@ app.prepare().then(() => {
         }
       }
 
-      if (typeof ownerAddress === "string") {
-        const trimmedOwner = ownerAddress.trim();
-        if (trimmedOwner) {
-          data.ownerAddress = trimmedOwner;
-        }
-      }
 
       const payload = ensureMintStatus(data, filePath);
       fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), "utf-8");
