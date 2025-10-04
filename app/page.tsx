@@ -15,10 +15,18 @@ export default function RahabMintSite() {
       try {
         const res = await fetch("/api/metadata");
         const data = await res.json();
-        setCategories(Object.keys(data));
-        setNfts(data);
+        if (!res.ok) {
+          throw new Error((data as any)?.error || `Request failed: ${res.status}`);
+        }
+        if (!data || typeof data !== "object") {
+          throw new Error("Invalid metadata payload");
+        }
+        setCategories(Object.keys(data as MetaDict));
+        setNfts(data as MetaDict);
       } catch (err) {
         console.error("Error loading metadata:", err);
+        setCategories([]);
+        setNfts({});
       }
     };
     fetchMetadata();
