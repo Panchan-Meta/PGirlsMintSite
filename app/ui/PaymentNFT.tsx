@@ -291,6 +291,9 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   }, [provider]);
 
   const [tokenAddr, setTokenAddr] = useState<string>("");
+  const [tokenStatus, setTokenStatus] = useState<
+    "unknown" | "resolving" | "resolved" | "missing"
+  >("unknown");
 
   const validateCandidate = useCallback(
     async (candidate: string | undefined | null) => {
@@ -329,9 +332,13 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     let cancelled = false;
 
     (async () => {
+      if (!cancelled) {
+        setTokenStatus("resolving");
+      }
       const resolved = await validateCandidate(resolvedTokenAddress);
       if (!cancelled && resolved) {
         setTokenAddr(resolved);
+        setTokenStatus("resolved");
         return;
       }
 
@@ -341,12 +348,14 @@ export default function PaymentNFT(props: PaymentNFTProps) {
           setResolvedTokenAddress(fallback);
         }
         setTokenAddr(fallback);
+        setTokenStatus("resolved");
         return;
       }
 
       if (!provider || !normalizedNftAddress) {
         if (!cancelled) {
           setTokenAddr("");
+          setTokenStatus(fallbackTokenAddress ? "resolving" : "missing");
         }
         return;
       }
@@ -364,6 +373,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
             setResolvedTokenAddress(onChain);
           }
           setTokenAddr(onChain);
+          setTokenStatus("resolved");
           return;
         }
       } catch (err) {
@@ -372,6 +382,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
 
       if (!cancelled) {
         setTokenAddr("");
+        setTokenStatus("missing");
       }
     })();
 
@@ -751,22 +762,25 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     if (!normalizedNftAddress) return "Contract Missing";
     if (contractStatus === "checking") return "Checking Contract";
     if (contractStatus === "missing") return "Contract Unavailable";
+    if (tokenStatus === "resolving") return "Resolving Token";
+    if (tokenStatus === "missing") return "Token Unavailable";
     if (isSoldOut) return "Sold Out";
     if (mintStatus !== LISTED_STATUS) return "Not Listed";
     if (!activePrice) return "No Price";
     if (isOwner) return "Owner Wallet";
     return "Mint";
-  }, [
-    minting,
-    provider,
-    account,
-    normalizedNftAddress,
-    contractStatus,
-    isSoldOut,
-    mintStatus,
-    activePrice,
-    isOwner,
-  ]);
+    }, [
+      minting,
+      provider,
+      account,
+      normalizedNftAddress,
+      contractStatus,
+      tokenStatus,
+      isSoldOut,
+      mintStatus,
+      activePrice,
+      isOwner,
+    ]);
 
   const isDisabled = useMemo(
     () =>
@@ -775,6 +789,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       !account ||
       !normalizedNftAddress ||
       contractStatus !== "ready" ||
+      tokenStatus !== "resolved" ||
       mintStatus !== LISTED_STATUS ||
       !activePrice ||
       isSoldOut ||
@@ -785,6 +800,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       account,
       normalizedNftAddress,
       contractStatus,
+      tokenStatus,
       mintStatus,
       activePrice,
       isSoldOut,
@@ -829,6 +845,23 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         <p style={{ fontSize: "0.8rem", color: "#ff8080" }}>
           Could not detect the specified NFT contract. Please check the network
           and address.
+        </p>
+      )}
+
+      {tokenStatus === "resolving" && (
+        <p style={{ fontSize: "0.8rem", color: "#8ecbff" }}>
+          Resolving PGirls token contract...
+        </p>
+      )}
+      {tokenStatus === "missing" && (
+        <p style={{ fontSize: "0.8rem", color: "#ff8080" }}>
+          Unable to determine the PGirls token contract. Please refresh after
+          verifying the metadata.
+        </p>
+      )}
+      {tokenStatus === "resolved" && tokenAddr && (
+        <p style={{ fontSize: "0.8rem", color: "#ccc" }}>
+          PGirls token: {tokenAddr}
         </p>
       )}
 
