@@ -25,6 +25,12 @@ ignition/
 # --- Project specific ---
 # メタデータはコミットしない
 metadata/
+!app/api/metadata/
+!app/api/metadata/**
+!app/api/updateListing/
+!app/api/updateListing/**
+!app/api/markSoldOut/
+!app/api/markSoldOut/**
 
 # 画像・動画はコミットしない（全ディレクトリ対象）
 **/*.jpg
