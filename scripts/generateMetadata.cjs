@@ -3,7 +3,24 @@
 
 const fs = require("fs");
 const path = require("path");
-const { Wallet } = require("ethers");
+const { ethers, Wallet } = require("ethers");
+const dotenv = require("dotenv");
+
+const PROJECT_ROOT = path.join(__dirname, "..");
+
+function loadEnv(envPath) {
+  if (!fs.existsSync(envPath)) return;
+  try {
+    const parsed = dotenv.parse(fs.readFileSync(envPath));
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof process.env[key] === "undefined") {
+        process.env[key] = value;
+      }
+    }
+  } catch (err) {
+    console.warn(`[warn] Failed to load ${envPath}:`, err?.message || err);
+  }
+}
 
 const ASSETS_DIR = path.join(__dirname, "../public/assets");
 const OUTPUT_DIR = path.join(__dirname, "../metadata");
@@ -18,7 +35,20 @@ function resolveOwnerAddressFromPrivateKey() {
   if (!OWNER_PRIVATE_KEY) {
     return "";
   }
+  try {
+    return new Wallet(OWNER_PRIVATE_KEY).address;
+  } catch (err) {
+    console.warn("[warn] Failed to derive owner from OWNER_PRIVATE_KEY:", err?.message || err);
+    return "";
+  }
 }
+
+const DEFAULT_OWNER_ADDRESS = resolveOwnerAddressFromPrivateKey();
+
+const ARTIFACT_PATH = path.join(
+  PROJECT_ROOT,
+  "artifacts/contracts/PGirlsNFT.sol/PGirlsNFT.json"
+);
 loadEnv(path.join(PROJECT_ROOT, ".env.local"));
 loadEnv(path.join(PROJECT_ROOT, ".env"));
 
@@ -57,6 +87,26 @@ const OWNER_ENV_KEYS = [
 const ownerEnvKey = OWNER_ENV_KEYS.find((key) => typeof process.env[key] === "string" && process.env[key].trim() !== "");
 const OWNER_RAW = ownerEnvKey ? process.env[ownerEnvKey] : undefined;
 
+const TREASURY_ENV_KEYS = [
+  "TREASURY_ADDRESS",
+  "NEXT_PUBLIC_TREASURY",
+  "NEXT_PUBLIC_NFT_OWNER",
+  "OWNER",
+  "OWNER_ADDRESS",
+];
+
+const treasuryEnvKey = TREASURY_ENV_KEYS.find((key) => typeof process.env[key] === "string" && process.env[key].trim() !== "");
+const TREASURY_RAW = treasuryEnvKey ? process.env[treasuryEnvKey] : OWNER_RAW;
+
+const TOKEN_ENV_KEYS = [
+  "PGIRLS_ERC20_ADDRESS",
+  "NEXT_PUBLIC_PGIRLS_ERC20_ADDRESS",
+  "NEXT_PUBLIC_PGIRLS",
+];
+
+const tokenEnvKey = TOKEN_ENV_KEYS.find((key) => typeof process.env[key] === "string" && process.env[key].trim() !== "");
+const PGIRLS_TOKEN_RAW = tokenEnvKey ? process.env[tokenEnvKey] : undefined;
+
 const RPC_URL     = process.env.RPC_URL;
 const PRIVATE_KEY = process.env.PRIVATE_KEY || "";
 
@@ -77,10 +127,14 @@ function toChecksumAddressOrThrow(label, value) {
 
 if (!FACTORY_RAW) throw new Error(".env の CREATE2_DEPLOYER/FACTORY/NEXT_PUBLIC_FACTORY が未設定です");
 if (!OWNER_RAW)   throw new Error(".env の NFT_OWNER/NEXT_PUBLIC_NFT_OWNER/TREASURY_ADDRESS/OWNER/OWNER_ADDRESS のいずれかを設定してください");
+if (!PGIRLS_TOKEN_RAW) throw new Error(".env の PGIRLS_ERC20_ADDRESS/NEXT_PUBLIC_PGIRLS_ERC20_ADDRESS/NEXT_PUBLIC_PGIRLS が未設定です");
+if (!TREASURY_RAW) throw new Error(".env の TREASURY_ADDRESS/NEXT_PUBLIC_TREASURY/NEXT_PUBLIC_NFT_OWNER/OWNER/OWNER_ADDRESS が未設定です");
 if (!RPC_URL)     throw new Error(".env の RPC_URL が未設定です");
 
 const FACTORY = toChecksumAddressOrThrow("CREATE2_DEPLOYER/FACTORY/NEXT_PUBLIC_FACTORY", FACTORY_RAW);
 const OWNER   = toChecksumAddressOrThrow("NFT_OWNER/NEXT_PUBLIC_NFT_OWNER/TREASURY_ADDRESS/OWNER/OWNER_ADDRESS", OWNER_RAW);
+const TREASURY = toChecksumAddressOrThrow("TREASURY_ADDRESS/NEXT_PUBLIC_TREASURY/NEXT_PUBLIC_NFT_OWNER/OWNER/OWNER_ADDRESS", TREASURY_RAW);
+const PGIRLS_TOKEN = toChecksumAddressOrThrow("PGIRLS_ERC20_ADDRESS/NEXT_PUBLIC_PGIRLS_ERC20_ADDRESS/NEXT_PUBLIC_PGIRLS", PGIRLS_TOKEN_RAW);
 
 if (!DEFAULT_OWNER_ADDRESS) {
   console.error(
@@ -88,7 +142,12 @@ if (!DEFAULT_OWNER_ADDRESS) {
   );
   process.exit(1);
 }
-const collArtifact = require(ARTIFACT_PATH);
+let collArtifact;
+try {
+  collArtifact = require(ARTIFACT_PATH);
+} catch (err) {
+  throw new Error(`Hardhat artifact が見つかりませんでした。先に "npx hardhat compile" を実行してください (path: ${ARTIFACT_PATH}).`);
+}
 
 // ===== 出力先 =====
 const SCRIPTS_META_DIR = path.join(__dirname, "metadata");
@@ -192,8 +251,8 @@ async function genOneCollection(provider, collectionName, allRows) {
   const salt = collectionSalt(collectionName);
   const nameForCollection = `${NAME_PREFIX}${collectionName}`; // 例: "SingleNFT #PFPs_1st_Collection"
 
-  // (address owner, string name, string symbol)
-  const encodedArgs = abiCoder.encode(["address","string","string"], [OWNER, nameForCollection, SYMBOL]);
+  // (address initialOwner, address pgirlsToken, address treasury)
+  const encodedArgs = abiCoder.encode(["address","address","address"], [OWNER, PGIRLS_TOKEN, TREASURY]);
   const initCode     = bytecode + encodedArgs.slice(2);
   const initCodeHash = ethers.keccak256(initCode);
   const predictedCollection = ethers.getCreate2Address(FACTORY, salt, initCodeHash);
@@ -212,6 +271,8 @@ async function genOneCollection(provider, collectionName, allRows) {
       ': "${CREATE2_DEPLOYER:?Missing CREATE2_DEPLOYER}"',
       ': "${RPC_URL:?Missing RPC_URL}"',
       ': "${PRIVATE_KEY:?Missing PRIVATE_KEY}"',
+      ': "${PGIRLS_ERC20_ADDRESS:=${NEXT_PUBLIC_PGIRLS_ERC20_ADDRESS:-${NEXT_PUBLIC_PGIRLS:-}}}"',
+      ': "${TREASURY_ADDRESS:=${NEXT_PUBLIC_TREASURY:-${NEXT_PUBLIC_NFT_OWNER:-${OWNER:-${OWNER_ADDRESS:-}}}}}"',
       'OWNER_ADDRESS=${NFT_OWNER:-${NEXT_PUBLIC_NFT_OWNER:-${TREASURY_ADDRESS:-${OWNER:-${OWNER_ADDRESS:-}}}}}',
       ': "${OWNER_ADDRESS:?Missing owner address (NFT_OWNER/NEXT_PUBLIC_NFT_OWNER/TREASURY_ADDRESS/OWNER/OWNER_ADDRESS)}"',
       `EXPECTED_OWNER="${OWNER}"`,
@@ -365,7 +426,7 @@ async function genOneCollection(provider, collectionName, allRows) {
     if (shouldDeploy) {
       const lines = [
         `echo "Deploying collection ${collectionName} -> ${predictedCollection}"`,
-        `cast send $CREATE2_DEPLOYER 'deploy(bytes32,bytes)' ${collectionSalt(collectionName)} ${bytecode + abiCoder.encode(["address","string","string"], [OWNER, `${NAME_PREFIX}${collectionName}`, SYMBOL]).slice(2)} --rpc-url $RPC_URL --private-key $PRIVATE_KEY $CAST_FLAGS $GAS_PRICE_OPT`,
+        `cast send $CREATE2_DEPLOYER 'deploy(bytes32,bytes)' ${collectionSalt(collectionName)} ${bytecode + abiCoder.encode(["address","address","address"], [OWNER, PGIRLS_TOKEN, TREASURY]).slice(2)} --rpc-url $RPC_URL --private-key $PRIVATE_KEY $CAST_FLAGS $GAS_PRICE_OPT`,
         `echo ""`,
         ``
       ];

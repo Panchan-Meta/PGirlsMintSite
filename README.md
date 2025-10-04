@@ -21,6 +21,7 @@ Deployment helpers expect the following variables to be available (for example i
 
 - `CREATE2_DEPLOYER` / `NEXT_PUBLIC_FACTORY` – address of the CREATE2 factory contract.
 - `NEXT_PUBLIC_NFT_OWNER` / `TREASURY_ADDRESS` – default owner/treasury that will receive mint proceeds.
+- `PGIRLS_ERC20_ADDRESS` / `NEXT_PUBLIC_PGIRLS_ERC20_ADDRESS` – ERC20 token used for minting payments.
 - `RPC_URL` – JSON-RPC endpoint for the PGirls chain.
 - `PRIVATE_KEY` – the account that signs deployment transactions.
 
