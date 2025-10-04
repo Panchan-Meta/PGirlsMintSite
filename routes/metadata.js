@@ -52,8 +52,7 @@ router.get("/", (req, res) => {
 
 router.post("/updateListing", (req, res) => {
   try {
-    const { category, fileName, mintStatus, price, ownerAddress } =
-      req.body || {};
+
     if (!category || !fileName) {
       res.status(400).json({ error: "category and fileName are required" });
       return;
@@ -82,12 +81,6 @@ router.post("/updateListing", (req, res) => {
       }
     }
 
-    if (typeof ownerAddress === "string") {
-      const trimmedOwner = ownerAddress.trim();
-      if (trimmedOwner) {
-        data.ownerAddress = trimmedOwner;
-      }
-    }
 
     const payload = ensureMintStatus(data, filePath);
     fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), "utf-8");
