@@ -63,43 +63,6 @@ async function readCategory(category: string) {
     }
   }
 
-  const getOrderKey = (item: { fileName: string; metadata: Record<string, any> }) => {
-    const { metadata, fileName } = item;
-    const tokenIdValue = metadata?.tokenId;
-    if (typeof tokenIdValue === "number" && Number.isFinite(tokenIdValue)) {
-      return tokenIdValue;
-    }
-    if (typeof tokenIdValue === "string" && tokenIdValue.trim()) {
-      const parsed = Number.parseInt(tokenIdValue, 10);
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
-    }
-    const match = fileName.match(/\d+/);
-    if (match) {
-      const parsed = Number.parseInt(match[0], 10);
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
-    }
-    return Number.POSITIVE_INFINITY;
-  };
-
-  result.sort((a, b) => {
-    const aKey = getOrderKey(a);
-    const bKey = getOrderKey(b);
-
-    const aFinite = Number.isFinite(aKey);
-    const bFinite = Number.isFinite(bKey);
-
-    if (aFinite && bFinite) {
-      return aKey - bKey;
-    }
-    if (aFinite) return -1;
-    if (bFinite) return 1;
-    return a.fileName.localeCompare(b.fileName, "en");
-  });
-
   return result;
 }
 
@@ -126,5 +89,4 @@ export async function GET() {
   }
 }
 
-export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
