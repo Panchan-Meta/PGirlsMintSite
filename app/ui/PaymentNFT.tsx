@@ -130,6 +130,11 @@ const INSUFFICIENT_BALANCE_PATTERNS = [
   "balance too low",
 ];
 
+const ALLOWANCE_RESET_PATTERNS = [
+  "missing revert data",
+  "without a reason string",
+];
+
 function extractErrorMessage(error: any): string | undefined {
   if (!error) return undefined;
   if (typeof error === "string") return error;
@@ -443,7 +448,18 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         normalizedNftAddress
       );
       if (allowance < parsedPrice) {
-        const txApprove = await erc20.approve(normalizedNftAddress, parsedPrice);
+        if (allowance > 0n) {
+          // Some ERC-20 contracts (e.g., USDT-style) require setting the allowance
+          // to zero before increasing it. Mobile wallets on Rahab return a
+          // "missing revert data" error otherwise.
+          const txReset = await erc20.approve(normalizedNftAddress, 0);
+          await txReset.wait();
+        }
+
+        const txApprove = await erc20.approve(
+          normalizedNftAddress,
+          parsedPrice
+        );
         await txApprove.wait();
       }
 
