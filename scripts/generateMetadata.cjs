@@ -23,6 +23,9 @@ loadEnv(path.join(PROJECT_ROOT, ".env"));
 // ===== 基本設定 =====
 const PUBLIC_DIR      = path.join(PROJECT_ROOT, "public", "assets");
 const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL || "http://localhost:3000").replace(/\/+$/, "");
+const METADATA_BASE_URL = String(
+  process.env.METADATA_BASE_URL || `${PUBLIC_BASE_URL}/metadata`
+).replace(/\/+$/, "");
 const IMAGE_EXT       = (process.env.IMAGE_EXT || "png").replace(/^\./, ""); // 例: png/jpg/webp
 const PAD             = Number(process.env.PAD || 3);
 
@@ -140,6 +143,8 @@ async function genOneCollection(provider, collectionName, allRows) {
   if (!imgs.length) { console.warn(`[warn] 画像が見つかりません (skip): ${collectionName}`); return; }
 
   const encodedCat = encodeURIComponent(collectionName);
+  const collectionMetaDir = path.join(SITE_META_DIR, collectionName);
+  if (!DRY_RUN) fs.mkdirSync(collectionMetaDir, { recursive: true });
 
   // --- コレクション1本の予測アドレス ---
   const salt = collectionSalt(collectionName);
@@ -191,9 +196,9 @@ async function genOneCollection(provider, collectionName, allRows) {
     const jsonRel  = (subdir ? subdir + "/" : "") + `${baseNum}.json`;
 
     const imageUrl = `${PUBLIC_BASE_URL}/assets/${encodedCat}/${encPath(imageRel)}`;
-    const tokenURI = `${PUBLIC_BASE_URL}/assets/${encodedCat}/${encPath(jsonRel)}`;
+    const tokenURI = `${METADATA_BASE_URL}/${encodedCat}/${encPath(jsonRel)}`;
 
-    const jsonAbs = path.join(collectionDir, jsonRel);
+    const jsonAbs = path.join(collectionMetaDir, jsonRel);
     const jsonDir = path.dirname(jsonAbs);
     if (!DRY_RUN) fs.mkdirSync(jsonDir, { recursive: true });
 

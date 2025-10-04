@@ -17,6 +17,8 @@ interface PaymentNFTProps {
   initialSoldout?: boolean;
   initialMintStatus?: string;
   ownerAddress?: string;
+  provider: ethers.BrowserProvider | null;
+  account: string;
 }
 
 declare global {
@@ -133,9 +135,10 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     initialSoldout,
     initialMintStatus,
     ownerAddress,
+    provider,
+    account,
   } = props;
 
-  const [account, setAccount] = useState<string>("");
   const [minting, setMinting] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [isSoldOut, setIsSoldOut] = useState<boolean>(!!initialSoldout);
@@ -167,11 +170,6 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   const explorerBase =
     process.env.NEXT_PUBLIC_PGIRLSCHAIN_EXPLORER ||
     "https://explorer.rahabpunkaholicgirls.com";
-
-  const provider = useMemo(() => {
-    if (typeof window === "undefined" || !window.ethereum) return null;
-    return new ethers.BrowserProvider(window.ethereum);
-  }, []);
 
   const getSigner = useCallback(async () => {
     if (!provider) return null;
@@ -238,22 +236,9 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     mintStatus,
   ]);
 
-  /** 初期化：アカウント取得 & soldout チェック */
   useEffect(() => {
-    (async () => {
-      if (!provider) return;
-      try {
-        await window.ethereum?.request?.({ method: "eth_requestAccounts" });
-        const s = await provider.getSigner();
-        setAccount(await s.getAddress());
-      } catch (err) {
-        console.error(err);
-        setAccount("");
-      } finally {
-        checkSoldOut();
-      }
-    })();
-  }, [provider, checkSoldOut]);
+    checkSoldOut();
+  }, [checkSoldOut]);
 
   /** 残高の読み取り（アカウント/トークン変更時） */
   useEffect(() => {
@@ -275,6 +260,12 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       }
     })();
   }, [provider, account, erc20FromChain, erc20Address]);
+
+  useEffect(() => {
+    if (!account) {
+      setBalance("");
+    }
+  }, [account]);
 
   const getOwnerFromMetadata = useCallback((metadata: any) => {
     if (!metadata || typeof metadata !== "object") return "";

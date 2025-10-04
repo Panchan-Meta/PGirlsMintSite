@@ -62,6 +62,7 @@ async function readCategory(category: string) {
       console.error(`Failed to read metadata: ${filePath}`, err);
     }
   }
+
   return result;
 }
 
