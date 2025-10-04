@@ -122,6 +122,52 @@ const ERC20_ABI_MIN = [
   "function approve(address spender, uint256 amount) returns (bool)",
 ] as const;
 
+const INSUFFICIENT_BALANCE_PATTERNS = [
+  "insufficient balance",
+  "insufficient funds",
+  "transfer amount exceeds balance",
+  "exceeds balance",
+  "balance too low",
+];
+
+function extractErrorMessage(error: any): string | undefined {
+  if (!error) return undefined;
+  if (typeof error === "string") return error;
+
+  const candidates = [
+    error?.reason,
+    error?.shortMessage,
+    error?.data?.message,
+    error?.error?.message,
+    error?.error?.data?.message,
+    error?.message,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+function getFriendlyErrorMessage(error: any): string {
+  const raw = extractErrorMessage(error);
+  if (!raw) return "Mint failed";
+
+  const normalized = raw.toLowerCase();
+  const matchesInsufficient = INSUFFICIENT_BALANCE_PATTERNS.some((pattern) =>
+    normalized.includes(pattern)
+  );
+
+  if (matchesInsufficient || error?.code === "INSUFFICIENT_FUNDS") {
+    return "PGirlsトークンの残高が不足しています (残高不足エラー)。";
+  }
+
+  return raw;
+}
+
 export default function PaymentNFT(props: PaymentNFTProps) {
   const {
     nftContractAddr,
@@ -275,8 +321,15 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   }, []);
 
   /** ---------- Mint ---------- */
+  const isOwner = useMemo(() => {
+    if (!account || !currentOwnerAddress) return false;
+    return (
+      account.trim().toLowerCase() === currentOwnerAddress.trim().toLowerCase()
+    );
+  }, [account, currentOwnerAddress]);
+
   const handleMint = useCallback(async () => {
-    if (minting || isSoldOut || mintStatus !== LISTED_STATUS) return;
+    if (minting || isSoldOut || mintStatus !== LISTED_STATUS || isOwner) return;
     try {
       setMinting(true);
       setTxHash(null);
@@ -373,13 +426,14 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       await checkSoldOut();
     } catch (e: any) {
       console.error(e);
-      alert(e?.reason || e?.message || "Mint failed");
+      alert(getFriendlyErrorMessage(e));
     } finally {
       setMinting(false);
     }
   }, [
     minting,
     isSoldOut,
+    isOwner,
     provider,
     getSigner,
     erc20Address,
@@ -408,13 +462,6 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     },
     [mintStatus]
   );
-
-  const isOwner = useMemo(() => {
-    if (!account || !currentOwnerAddress) return false;
-    return (
-      account.trim().toLowerCase() === currentOwnerAddress.trim().toLowerCase()
-    );
-  }, [account, currentOwnerAddress]);
 
   const canList = useMemo(() => {
     if (!isOwner) return false;
@@ -506,8 +553,9 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     if (isSoldOut) return "Sold Out";
     if (mintStatus !== LISTED_STATUS) return "Not Listed";
     if (!activePrice) return "No Price";
+    if (isOwner) return "Owner Wallet";
     return "Mint";
-  }, [minting, provider, account, isSoldOut, mintStatus, activePrice]);
+  }, [minting, provider, account, isSoldOut, mintStatus, activePrice, isOwner]);
 
   const isDisabled = useMemo(
     () =>
@@ -516,8 +564,9 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       !account ||
       mintStatus !== LISTED_STATUS ||
       !activePrice ||
-      isSoldOut,
-    [minting, provider, account, mintStatus, activePrice, isSoldOut]
+      isSoldOut ||
+      isOwner,
+    [minting, provider, account, mintStatus, activePrice, isSoldOut, isOwner]
   );
 
   return (
