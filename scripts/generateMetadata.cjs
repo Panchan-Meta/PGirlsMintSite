@@ -12,12 +12,6 @@ function validateTreasuryAddress(address) {
   if (!address) {
     return false;
   }
-
-  if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
-    return false;
-  }
-
-  return address;
 }
 
 const DEFAULT_OWNER_ADDRESS = validateTreasuryAddress(TREASURY_ADDRESS);
