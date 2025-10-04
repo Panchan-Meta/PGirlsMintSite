@@ -23,7 +23,15 @@ deployments/
 ignition/
 
 # --- Project specific ---
-# メタデータはコミットしない
+# API route implementations remain tracked
+!app/api/metadata/
+!app/api/metadata/**
+!app/api/updateListing/
+!app/api/updateListing/**
+!app/api/markSoldOut/
+!app/api/markSoldOut/**
+
+# メタデータは生成物のためトラッキングしない
 metadata/
 
 # 画像・動画はコミットしない（全ディレクトリ対象）
