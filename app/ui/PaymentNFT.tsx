@@ -321,6 +321,13 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   }, []);
 
   /** ---------- Mint ---------- */
+  const isOwner = useMemo(() => {
+    if (!account || !currentOwnerAddress) return false;
+    return (
+      account.trim().toLowerCase() === currentOwnerAddress.trim().toLowerCase()
+    );
+  }, [account, currentOwnerAddress]);
+
   const handleMint = useCallback(async () => {
     if (minting || isSoldOut || mintStatus !== LISTED_STATUS || isOwner) return;
     try {
@@ -455,13 +462,6 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     },
     [mintStatus]
   );
-
-  const isOwner = useMemo(() => {
-    if (!account || !currentOwnerAddress) return false;
-    return (
-      account.trim().toLowerCase() === currentOwnerAddress.trim().toLowerCase()
-    );
-  }, [account, currentOwnerAddress]);
 
   const canList = useMemo(() => {
     if (!isOwner) return false;
