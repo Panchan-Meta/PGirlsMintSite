@@ -448,7 +448,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         normalizedNftAddress
       );
       if (allowance < parsedPrice) {
-        if (allowance > 0n) {
+        if (allowance > BigInt(0)) {
           // Some ERC-20 contracts (e.g., USDT-style) require setting the allowance
           // to zero before increasing it. Mobile wallets on Rahab return a
           // "missing revert data" error otherwise.
