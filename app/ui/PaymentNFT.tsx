@@ -565,12 +565,12 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         );
       }
 
-      const allowance = await erc20.allowance(
+      const currentAllowance: bigint = await erc20.allowance(
         ownerAddr,
         normalizedNftAddress
       );
-      if (allowance < parsedPrice) {
-        if (allowance > BigInt(0)) {
+      if (currentAllowance < parsedPrice) {
+        if (currentAllowance > 0n) {
           // Some ERC-20 contracts (e.g., USDT-style) require setting the allowance
           // to zero before increasing it. Mobile wallets on Rahab return a
           // "missing revert data" error otherwise.
@@ -582,7 +582,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         ).wait();
 
         // Re-read allowance to ensure the approval actually succeeded before minting.
-        const updatedAllowance = await erc20.allowance(
+        const updatedAllowance: bigint = await erc20.allowance(
           ownerAddr,
           normalizedNftAddress
         );
