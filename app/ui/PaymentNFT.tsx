@@ -697,9 +697,13 @@ export default function PaymentNFT(props: PaymentNFTProps) {
 
   const canList = useMemo(() => {
     if (!isOwner) return false;
-    if (isSoldOut) return false;
     return true;
-  }, [isOwner, isSoldOut]);
+  }, [isOwner]);
+
+  const shouldShowListingControls = useMemo(() => {
+    if (canList) return true;
+    return !isSoldOut;
+  }, [canList, isSoldOut]);
 
   const disableListingButton = useMemo(() => {
     if (updatingListing || !canList) return true;
@@ -787,10 +791,10 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     if (contractStatus === "missing") return "Contract Unavailable";
     if (tokenStatus === "resolving") return "Resolving Token";
     if (tokenStatus === "missing") return "Token Unavailable";
+    if (isOwner) return "Owner Wallet";
     if (isSoldOut) return "Sold Out";
     if (mintStatus !== LISTED_STATUS) return "Not Listed";
     if (!activePrice) return "No Price";
-    if (isOwner) return "Owner Wallet";
     return "Mint";
     }, [
       minting,
@@ -905,7 +909,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       </p>
       <p style={{ fontSize: "0.8rem", color: "#ccc" }}>Token ID: {formattedTokenId}</p>
 
-      {!isSoldOut && (
+      {shouldShowListingControls && (
         <div
           style={{
             display: "flex",
