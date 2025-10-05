@@ -73,27 +73,76 @@ const pickAddressFromMetadata = (
 type Item = { fileName: string; metadata: any };
 type MetaDict = Record<string, Item[]>;
 
-const selectEthereumProvider = (ethereum?: any) => {
+const selectEthereumProvider = (ethereumCandidate?: any) => {
+  const candidates: any[] = [];
+
+  const addCandidate = (value: any) => {
+    if (!value || typeof value !== "object") {
+      return;
+    }
+    if (!candidates.includes(value)) {
+      candidates.push(value);
+    }
+  };
+
+  addCandidate(ethereumCandidate);
+
+  if (typeof window !== "undefined") {
+    const globalWindow = window as typeof window & {
+      ethereum?: any;
+      web3?: { currentProvider?: any };
+    };
+    addCandidate(globalWindow.ethereum);
+    addCandidate(globalWindow.web3?.currentProvider);
+  }
+
+  for (const candidate of [...candidates]) {
+    if (!candidate) continue;
+
+    const { providers, providerMap, selectedProvider } = candidate;
+
+    if (Array.isArray(providers)) {
+      providers.forEach(addCandidate);
+    } else if (providers && typeof providers === "object") {
+      Object.values(providers).forEach(addCandidate);
+    }
+
+    if (providerMap?.get) {
+      addCandidate(providerMap.get("MetaMask"));
+      addCandidate(providerMap.get("metamask"));
+    }
+
+    addCandidate(selectedProvider);
+  }
+
+  for (const candidate of candidates) {
+    if (candidate?.isMetaMask) {
+      return candidate;
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (typeof candidate?.request === "function") {
+      return candidate;
+    }
+    if (typeof candidate?.enable === "function") {
+      return candidate;
+    }
+  }
+
+  return null;
+};
+
+const createBrowserProvider = (
+  ethereum: any
+): ethers.BrowserProvider | null => {
   if (!ethereum) return null;
-
-  if (Array.isArray(ethereum.providers) && ethereum.providers.length > 0) {
-    const metamask = ethereum.providers.find((prov: any) => prov?.isMetaMask);
-    if (metamask) {
-      return metamask;
-    }
-    return ethereum.providers[0];
+  try {
+    return new ethers.BrowserProvider(ethereum);
+  } catch (err) {
+    console.error("Failed to initialize BrowserProvider", err);
+    return null;
   }
-
-  const providerMap = ethereum.providerMap;
-  if (providerMap?.get) {
-    const metamaskProvider =
-      providerMap.get("MetaMask") ?? providerMap.get("metamask");
-    if (metamaskProvider) {
-      return metamaskProvider;
-    }
-  }
-
-  return ethereum;
 };
 
 const normalizeAddress = (value: unknown): string => {
@@ -258,7 +307,8 @@ export default function RahabMintSite() {
 
       ethereumRef.current = ethereum;
       setHasProvider(true);
-      setProvider(new ethers.BrowserProvider(ethereum));
+      const nextProvider = createBrowserProvider(ethereum);
+      setProvider(nextProvider);
 
       ethereum
         .request?.({ method: "eth_accounts" })
@@ -357,21 +407,38 @@ export default function RahabMintSite() {
         return;
       }
 
-      const accounts: string[] = await injected.request({
-        method: "eth_requestAccounts",
-      });
+      setHasProvider(true);
+      let accounts: string[] = [];
+
+      if (typeof injected.request === "function") {
+        accounts =
+          (await injected.request({
+            method: "eth_requestAccounts",
+            params: [],
+          })) ?? [];
+      }
+
+      if ((!accounts || accounts.length === 0) && typeof injected.enable === "function") {
+        accounts = (await injected.enable()) ?? [];
+      }
+
       if (accounts && accounts.length > 0) {
         try {
           setAccount(ethers.getAddress(accounts[0]));
         } catch {
           setAccount(accounts[0]);
         }
+      } else {
+        throw new Error("No accounts returned by provider");
       }
-      if (!provider || ethereumRef.current !== injected) {
-        setProvider(new ethers.BrowserProvider(injected));
+
+      const nextProvider = createBrowserProvider(injected);
+      if (nextProvider) {
+        setProvider(nextProvider);
+      } else if (!provider) {
+        setProvider(null);
       }
       ethereumRef.current = injected;
-      setHasProvider(true);
     } catch (err) {
       console.error("Failed to connect wallet", err);
     } finally {
@@ -396,16 +463,15 @@ export default function RahabMintSite() {
     }
   }, [account, connectWallet, disconnectWallet]);
 
-  const walletButtonDisabled = useMemo(() => {
-    if (isConnecting) return true;
-    if (!hasProvider && !account) return true;
-    return false;
-  }, [isConnecting, hasProvider, account]);
+  const walletButtonDisabled = useMemo(
+    () => isConnecting,
+    [isConnecting]
+  );
 
   const walletButtonText = useMemo(() => {
     if (isConnecting) return "Connecting...";
     if (account) return "Disconnect";
-    if (!hasProvider) return "No Wallet";
+    if (!hasProvider) return "Connect Wallet";
     return "Connect";
   }, [isConnecting, account, hasProvider]);
 
