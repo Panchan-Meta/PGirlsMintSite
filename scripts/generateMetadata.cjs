@@ -3,7 +3,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { ethers, Wallet } = require("ethers");
+const { ethers } = require("ethers");
 const dotenv = require("dotenv");
 
 const PROJECT_ROOT = path.join(__dirname, "..");
@@ -25,26 +25,6 @@ function loadEnv(envPath) {
 const ASSETS_DIR = path.join(__dirname, "../public/assets");
 const OUTPUT_DIR = path.join(__dirname, "../metadata");
 const BASE_URL = "https://mint.rahabpunkaholicgirls.com/assets";
-const OWNER_PRIVATE_KEY = (
-  process.env.OWNER_PRIVATE_KEY || process.env.METADATA_OWNER_PRIVATE_KEY || ""
-)
-  .trim()
-  .replace(/^['"]+|['"]+$/g, "");
-
-function resolveOwnerAddressFromPrivateKey() {
-  if (!OWNER_PRIVATE_KEY) {
-    return "";
-  }
-  try {
-    return new Wallet(OWNER_PRIVATE_KEY).address;
-  } catch (err) {
-    console.warn("[warn] Failed to derive owner from OWNER_PRIVATE_KEY:", err?.message || err);
-    return "";
-  }
-}
-
-const DEFAULT_OWNER_ADDRESS = resolveOwnerAddressFromPrivateKey();
-
 const ARTIFACT_PATH = path.join(
   PROJECT_ROOT,
   "artifacts/contracts/PGirlsNFT.sol/PGirlsNFT.json"
@@ -136,12 +116,6 @@ const OWNER   = toChecksumAddressOrThrow("NFT_OWNER/NEXT_PUBLIC_NFT_OWNER/TREASU
 const TREASURY = toChecksumAddressOrThrow("TREASURY_ADDRESS/NEXT_PUBLIC_TREASURY/NEXT_PUBLIC_NFT_OWNER/OWNER/OWNER_ADDRESS", TREASURY_RAW);
 const PGIRLS_TOKEN = toChecksumAddressOrThrow("PGIRLS_ERC20_ADDRESS/NEXT_PUBLIC_PGIRLS_ERC20_ADDRESS/NEXT_PUBLIC_PGIRLS", PGIRLS_TOKEN_RAW);
 
-if (!DEFAULT_OWNER_ADDRESS) {
-  console.error(
-    "[metadata] OWNER_PRIVATE_KEY (or METADATA_OWNER_PRIVATE_KEY) is missing or invalid. Unable to derive owner address."
-  );
-  process.exit(1);
-}
 let collArtifact;
 try {
   collArtifact = require(ARTIFACT_PATH);
