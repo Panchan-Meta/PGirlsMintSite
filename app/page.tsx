@@ -15,6 +15,58 @@ type MetadataRecord = Record<string, unknown>;
 const DEFAULT_NFT_CONTRACT = "0x704Bf56A89c745e6A62C70803816E83b009d2211";
 const DEFAULT_ERC20_CONTRACT = "0x654f25F2a36997C397Aad8a66D5a8783b6E61b9b";
 
+// === Chain config from env ===
+const CHAIN_ID_HEX =
+  process.env.NEXT_PUBLIC_CHAIN_ID_HEX?.toLowerCase() ?? "0x539"; // 0x539 = 1337 (dummy)
+const CHAIN_NAME =
+  process.env.NEXT_PUBLIC_CHAIN_NAME ?? "PGirlsChain";
+const RPC_URL =
+  process.env.NEXT_PUBLIC_RPC_URL ?? "";
+const NATIVE_SYMBOL =
+  process.env.NEXT_PUBLIC_NATIVE_SYMBOL ?? "PGC";
+const EXPLORER =
+  process.env.NEXT_PUBLIC_PGIRLSCHAIN_EXPLORER ?? "";
+
+// Ensure wallet is connected to the correct chain
+async function ensureCorrectNetwork(eth: any) {
+  if (!eth) return false;
+  const current: string = (await eth.request({ method: "eth_chainId" })) ?? "";
+  if (current?.toLowerCase() === CHAIN_ID_HEX.toLowerCase()) return true;
+
+  try {
+    await eth.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: CHAIN_ID_HEX }],
+    });
+    return true;
+  } catch (err: any) {
+    if (err?.code === 4902 && RPC_URL) {
+      await eth.request({
+        method: "wallet_addEthereumChain",
+        params: [
+          {
+            chainId: CHAIN_ID_HEX,
+            chainName: CHAIN_NAME,
+            rpcUrls: [RPC_URL],
+            nativeCurrency: {
+              name: CHAIN_NAME,
+              symbol: NATIVE_SYMBOL,
+              decimals: 18,
+            },
+            blockExplorerUrls: EXPLORER ? [EXPLORER] : [],
+          },
+        ],
+      });
+      await eth.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: CHAIN_ID_HEX }],
+      });
+      return true;
+    }
+    throw err;
+  }
+}
+
 const ADDRESS_KEYS = {
   nft: [
     "nftContractAddr",
@@ -226,6 +278,7 @@ export default function RahabMintSite() {
   const [account, setAccount] = useState<string>("");
   const [hasProvider, setHasProvider] = useState<boolean>(false);
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
+  const [networkOk, setNetworkOk] = useState<boolean>(true);
   const ethereumRef = useRef<any>(null);
 
   useEffect(() => {
@@ -279,6 +332,19 @@ export default function RahabMintSite() {
       setNormalizedAccount(accounts);
     };
 
+    const handleChainChanged = async (_chainId: string) => {
+      try {
+        if (!ethereumRef.current) return;
+        const ok = await ensureCorrectNetwork(ethereumRef.current);
+        const nextProvider = createBrowserProvider(ethereumRef.current);
+        setProvider(ok ? nextProvider : null);
+        setNetworkOk(Boolean(ok));
+      } catch {
+        setProvider(null);
+        setNetworkOk(false);
+      }
+    };
+
     const setupProvider = (ethereumCandidate?: any) => {
       if (!mounted) return;
 
@@ -288,11 +354,13 @@ export default function RahabMintSite() {
         setHasProvider(false);
         setProvider(null);
         setAccountSafely("");
+        setNetworkOk(false);
         if (ethereumRef.current) {
           ethereumRef.current.removeListener?.(
             "accountsChanged",
             handleAccountsChanged
           );
+          ethereumRef.current.removeListener?.("chainChanged", handleChainChanged);
         }
         ethereumRef.current = null;
         return false;
@@ -302,6 +370,10 @@ export default function RahabMintSite() {
         ethereumRef.current.removeListener?.(
           "accountsChanged",
           handleAccountsChanged
+        );
+        ethereumRef.current.removeListener?.(
+          "chainChanged",
+          handleChainChanged
         );
       }
 
@@ -321,6 +393,8 @@ export default function RahabMintSite() {
 
       ethereum.removeListener?.("accountsChanged", handleAccountsChanged);
       ethereum.on?.("accountsChanged", handleAccountsChanged);
+      ethereum.removeListener?.("chainChanged", handleChainChanged);
+      ethereum.on?.("chainChanged", handleChainChanged);
       return true;
     };
 
@@ -387,6 +461,7 @@ export default function RahabMintSite() {
       }
       const currentEthereum = ethereumRef.current;
       currentEthereum?.removeListener?.("accountsChanged", handleAccountsChanged);
+      currentEthereum?.removeListener?.("chainChanged", handleChainChanged);
     };
   }, []);
 
@@ -406,8 +481,11 @@ export default function RahabMintSite() {
         alert("MetaMask not found");
         return;
       }
-
       setHasProvider(true);
+
+      await ensureCorrectNetwork(injected);
+      setNetworkOk(true);
+
       let accounts: string[] = [];
 
       if (typeof injected.request === "function") {
@@ -416,31 +494,28 @@ export default function RahabMintSite() {
             method: "eth_requestAccounts",
             params: [],
           })) ?? [];
-      }
-
-      if ((!accounts || accounts.length === 0) && typeof injected.enable === "function") {
+      } else if (typeof injected.enable === "function") {
         accounts = (await injected.enable()) ?? [];
       }
 
-      if (accounts && accounts.length > 0) {
-        try {
-          setAccount(ethers.getAddress(accounts[0]));
-        } catch {
-          setAccount(accounts[0]);
-        }
-      } else {
+      if (!accounts.length) {
         throw new Error("No accounts returned by provider");
       }
 
-      const nextProvider = createBrowserProvider(injected);
-      if (nextProvider) {
-        setProvider(nextProvider);
-      } else if (!provider) {
-        setProvider(null);
+      try {
+        setAccount(ethers.getAddress(accounts[0]));
+      } catch {
+        setAccount(accounts[0]);
       }
+
+      const nextProvider = createBrowserProvider(injected);
+      setProvider(nextProvider);
       ethereumRef.current = injected;
     } catch (err) {
       console.error("Failed to connect wallet", err);
+      alert(
+        "Wallet connection failed. Please approve the network switch in your wallet and try again."
+      );
     } finally {
       setIsConnecting(false);
     }
@@ -448,6 +523,36 @@ export default function RahabMintSite() {
 
   const disconnectWallet = useCallback(() => {
     setAccount("");
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const eth = ethereumRef.current;
+        if (!eth) {
+          setNetworkOk(false);
+          return;
+        }
+        const id = (await eth.request({ method: "eth_chainId" }))?.toLowerCase();
+        setNetworkOk(id === CHAIN_ID_HEX.toLowerCase());
+      } catch {
+        setNetworkOk(false);
+      }
+    })();
+  }, [provider, account]);
+
+  const switchNetworkManually = useCallback(async () => {
+    try {
+      const eth = ethereumRef.current;
+      if (!eth) return;
+      await ensureCorrectNetwork(eth);
+      const next = createBrowserProvider(eth);
+      setProvider(next);
+      setNetworkOk(true);
+    } catch (e) {
+      console.error(e);
+      alert("Failed to switch network in wallet.");
+    }
   }, []);
 
   const walletLabel = useMemo(() => {
@@ -560,6 +665,23 @@ export default function RahabMintSite() {
           >
             {walletButtonText}
           </button>
+          {hasProvider && !networkOk && (
+            <button
+              onClick={switchNetworkManually}
+              style={{
+                marginTop: "6px",
+                padding: "0.35rem 1rem",
+                borderRadius: 999,
+                border: "1px solid #ff9c9c",
+                background: "transparent",
+                color: "#ff9c9c",
+                cursor: "pointer",
+                fontSize: "0.9rem",
+              }}
+            >
+              Switch to {CHAIN_NAME}
+            </button>
+          )}
         </div>
         {/* Title + Get PGirls (横並び&中央寄せ) */}
         <div
