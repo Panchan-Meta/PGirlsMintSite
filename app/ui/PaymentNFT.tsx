@@ -141,6 +141,31 @@ const ALLOWANCE_RESET_PATTERNS = [
   "without a reason string",
 ];
 
+async function ensureAllowance({
+  erc20,
+  user,
+  spender,
+  price,
+}: {
+  erc20: ethers.Contract;
+  user: string;
+  spender: string;
+  price: bigint;
+}) {
+  const currentAllowance: bigint = await erc20.allowance(user, spender);
+  if (currentAllowance >= price) {
+    return;
+  }
+
+  if (currentAllowance > 0n) {
+    const resetTx = await erc20.approve(spender, 0n);
+    await resetTx.wait();
+  }
+
+  const approveTx = await erc20.approve(spender, price);
+  await approveTx.wait();
+}
+
 function extractErrorMessage(error: any): string | undefined {
   if (!error) return undefined;
   if (typeof error === "string") return error;
@@ -565,38 +590,22 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         );
       }
 
-      const currentAllowance: bigint = await erc20.allowance(
+      await ensureAllowance({
+        erc20,
+        user: ownerAddr,
+        spender: normalizedNftAddress,
+        price: parsedPrice,
+      });
+
+      // Re-read allowance to ensure the approval actually succeeded before minting.
+      const updatedAllowance: bigint = await erc20.allowance(
         ownerAddr,
         normalizedNftAddress
       );
-
-      const needsApproval = currentAllowance < parsedPrice;
-      if (needsApproval) {
-        const requiresReset =
-          currentAllowance > 0n && currentAllowance < parsedPrice;
-        if (requiresReset) {
-          // Some ERC-20 contracts (e.g., USDT-style) require setting the allowance
-          // to zero before increasing it. Mobile wallets on Rahab return a
-          // "missing revert data" error otherwise.
-          await (await erc20.approve(normalizedNftAddress, 0)).wait();
-        }
-
-        const approveTx = await erc20.approve(
-          normalizedNftAddress,
-          parsedPrice
+      if (updatedAllowance < parsedPrice) {
+        throw new Error(
+          "Approval transaction completed but allowance is still insufficient. Please retry."
         );
-        await approveTx.wait();
-
-        // Re-read allowance to ensure the approval actually succeeded before minting.
-        const updatedAllowance: bigint = await erc20.allowance(
-          ownerAddr,
-          normalizedNftAddress
-        );
-        if (updatedAllowance < parsedPrice) {
-          throw new Error(
-            "Approval transaction completed but allowance is still insufficient. Please retry."
-          );
-        }
       }
 
       const nft = new ethers.Contract(
