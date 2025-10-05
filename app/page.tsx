@@ -665,23 +665,7 @@ export default function RahabMintSite() {
           >
             {walletButtonText}
           </button>
-          {hasProvider && !networkOk && (
-            <button
-              onClick={switchNetworkManually}
-              style={{
-                marginTop: "6px",
-                padding: "0.35rem 1rem",
-                borderRadius: 999,
-                border: "1px solid #ff9c9c",
-                background: "transparent",
-                color: "#ff9c9c",
-                cursor: "pointer",
-                fontSize: "0.9rem",
-              }}
-            >
-              Switch to {CHAIN_NAME}
-            </button>
-          )}
+          {/* ネットワーク切り替えは必須ではないため、案内ボタンは表示しない */}
         </div>
         {/* Title + Get PGirls (横並び&中央寄せ) */}
         <div
