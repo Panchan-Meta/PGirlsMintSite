@@ -427,6 +427,12 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         setIsSoldOut(Boolean(initialSoldout));
         return;
       }
+
+      const priceValue = (activePrice || "").trim();
+      if (priceValue) {
+        setIsSoldOut(false);
+        return;
+      }
       if (
         !provider ||
         !normalizedNftAddress ||
@@ -468,6 +474,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     mintStatus,
     contractStatus,
     initialSoldout,
+    activePrice,
   ]);
 
   useEffect(() => {
