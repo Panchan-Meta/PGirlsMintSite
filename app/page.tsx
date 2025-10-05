@@ -73,6 +73,29 @@ const pickAddressFromMetadata = (
 type Item = { fileName: string; metadata: any };
 type MetaDict = Record<string, Item[]>;
 
+const selectEthereumProvider = (ethereum?: any) => {
+  if (!ethereum) return null;
+
+  if (Array.isArray(ethereum.providers) && ethereum.providers.length > 0) {
+    const metamask = ethereum.providers.find((prov: any) => prov?.isMetaMask);
+    if (metamask) {
+      return metamask;
+    }
+    return ethereum.providers[0];
+  }
+
+  const providerMap = ethereum.providerMap;
+  if (providerMap?.get) {
+    const metamaskProvider =
+      providerMap.get("MetaMask") ?? providerMap.get("metamask");
+    if (metamaskProvider) {
+      return metamaskProvider;
+    }
+  }
+
+  return ethereum;
+};
+
 const normalizeAddress = (value: unknown): string => {
   if (typeof value !== "string") {
     return "";
@@ -207,15 +230,30 @@ export default function RahabMintSite() {
       setNormalizedAccount(accounts);
     };
 
-    const setupProvider = (ethereum?: any) => {
+    const setupProvider = (ethereumCandidate?: any) => {
       if (!mounted) return;
+
+      const ethereum = selectEthereumProvider(ethereumCandidate);
 
       if (!ethereum) {
         setHasProvider(false);
         setProvider(null);
         setAccountSafely("");
+        if (ethereumRef.current) {
+          ethereumRef.current.removeListener?.(
+            "accountsChanged",
+            handleAccountsChanged
+          );
+        }
         ethereumRef.current = null;
-        return;
+        return false;
+      }
+
+      if (ethereumRef.current && ethereumRef.current !== ethereum) {
+        ethereumRef.current.removeListener?.(
+          "accountsChanged",
+          handleAccountsChanged
+        );
       }
 
       ethereumRef.current = ethereum;
@@ -233,27 +271,57 @@ export default function RahabMintSite() {
 
       ethereum.removeListener?.("accountsChanged", handleAccountsChanged);
       ethereum.on?.("accountsChanged", handleAccountsChanged);
+      return true;
     };
 
-    const { ethereum } = window as typeof window & { ethereum?: any };
-    setupProvider(ethereum);
+    const trySetupFromWindow = () => {
+      const { ethereum } = window as typeof window & { ethereum?: any };
+      return setupProvider(ethereum);
+    };
 
     const handleEthereumInitialized = (event?: Event) => {
       const detail = (event as CustomEvent)?.detail;
-      if (detail) {
-        setupProvider(detail);
-      } else {
-        const nextEthereum = (window as typeof window & { ethereum?: any })
-          .ethereum;
-        setupProvider(nextEthereum);
+      if (detail && setupProvider(detail)) {
+        return;
       }
+      trySetupFromWindow();
     };
 
-    window.addEventListener("ethereum#initialized", handleEthereumInitialized);
+    let pollId: number | undefined;
+    let fallbackId: number | undefined;
 
-    const fallbackId = window.setTimeout(() => {
-      handleEthereumInitialized();
-    }, 3000);
+    if (!trySetupFromWindow()) {
+      window.addEventListener(
+        "ethereum#initialized",
+        handleEthereumInitialized
+      );
+
+      pollId = window.setInterval(() => {
+        if (trySetupFromWindow()) {
+          window.removeEventListener(
+            "ethereum#initialized",
+            handleEthereumInitialized
+          );
+          if (pollId !== undefined) {
+            window.clearInterval(pollId);
+          }
+          if (fallbackId !== undefined) {
+            window.clearTimeout(fallbackId);
+          }
+        }
+      }, 400);
+
+      fallbackId = window.setTimeout(() => {
+        window.removeEventListener(
+          "ethereum#initialized",
+          handleEthereumInitialized
+        );
+        if (pollId !== undefined) {
+          window.clearInterval(pollId);
+        }
+        trySetupFromWindow();
+      }, 5000);
+    }
 
     return () => {
       mounted = false;
@@ -261,20 +329,35 @@ export default function RahabMintSite() {
         "ethereum#initialized",
         handleEthereumInitialized
       );
-      window.clearTimeout(fallbackId);
+      if (pollId !== undefined) {
+        window.clearInterval(pollId);
+      }
+      if (fallbackId !== undefined) {
+        window.clearTimeout(fallbackId);
+      }
       const currentEthereum = ethereumRef.current;
       currentEthereum?.removeListener?.("accountsChanged", handleAccountsChanged);
     };
   }, []);
 
   const connectWallet = useCallback(async () => {
-    if (typeof window === "undefined" || !window.ethereum) {
+    if (typeof window === "undefined") {
       alert("MetaMask not found");
       return;
     }
     try {
       setIsConnecting(true);
-      const accounts: string[] = await window.ethereum.request({
+      const injected = selectEthereumProvider(
+        ethereumRef.current ?? (window as typeof window & { ethereum?: any })
+          .ethereum
+      );
+
+      if (!injected) {
+        alert("MetaMask not found");
+        return;
+      }
+
+      const accounts: string[] = await injected.request({
         method: "eth_requestAccounts",
       });
       if (accounts && accounts.length > 0) {
@@ -284,9 +367,10 @@ export default function RahabMintSite() {
           setAccount(accounts[0]);
         }
       }
-      if (!provider) {
-        setProvider(new ethers.BrowserProvider(window.ethereum));
+      if (!provider || ethereumRef.current !== injected) {
+        setProvider(new ethers.BrowserProvider(injected));
       }
+      ethereumRef.current = injected;
       setHasProvider(true);
     } catch (err) {
       console.error("Failed to connect wallet", err);
