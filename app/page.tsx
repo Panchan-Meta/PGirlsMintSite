@@ -1,6 +1,12 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ethers } from "ethers";
 import PaymentNFT from "./ui/PaymentNFT";
 
@@ -66,6 +72,29 @@ const pickAddressFromMetadata = (
 
 type Item = { fileName: string; metadata: any };
 type MetaDict = Record<string, Item[]>;
+
+const selectEthereumProvider = (ethereum?: any) => {
+  if (!ethereum) return null;
+
+  if (Array.isArray(ethereum.providers) && ethereum.providers.length > 0) {
+    const metamask = ethereum.providers.find((prov: any) => prov?.isMetaMask);
+    if (metamask) {
+      return metamask;
+    }
+    return ethereum.providers[0];
+  }
+
+  const providerMap = ethereum.providerMap;
+  if (providerMap?.get) {
+    const metamaskProvider =
+      providerMap.get("MetaMask") ?? providerMap.get("metamask");
+    if (metamaskProvider) {
+      return metamaskProvider;
+    }
+  }
+
+  return ethereum;
+};
 
 const normalizeAddress = (value: unknown): string => {
   if (typeof value !== "string") {
@@ -148,6 +177,7 @@ export default function RahabMintSite() {
   const [account, setAccount] = useState<string>("");
   const [hasProvider, setHasProvider] = useState<boolean>(false);
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
+  const ethereumRef = useRef<any>(null);
 
   useEffect(() => {
     const fetchMetadata = async () => {
@@ -175,71 +205,159 @@ export default function RahabMintSite() {
     if (typeof window === "undefined") {
       return;
     }
-    const { ethereum } = window as typeof window & { ethereum?: any };
-    if (!ethereum) {
-      setHasProvider(false);
-      setProvider(null);
-      setAccount("");
-      return;
-    }
-
-    setHasProvider(true);
-    const nextProvider = new ethers.BrowserProvider(ethereum);
-    setProvider(nextProvider);
 
     let mounted = true;
 
-    const syncAccounts = async () => {
-      try {
-        const accounts: string[] = await ethereum.request?.({
-          method: "eth_accounts",
-        });
-        if (!mounted) return;
-        if (accounts && accounts.length > 0) {
-          try {
-            setAccount(ethers.getAddress(accounts[0]));
-          } catch {
-            setAccount(accounts[0]);
-          }
-        } else {
-          setAccount("");
-        }
-      } catch (err) {
-        console.error("Failed to read initial accounts", err);
-      }
+    const setAccountSafely = (value: string) => {
+      if (!mounted) return;
+      setAccount(value);
     };
 
-    syncAccounts();
-
-    const handleAccountsChanged = (accounts: string[]) => {
+    const setNormalizedAccount = (accounts: string[] | undefined | null) => {
       if (!mounted) return;
       if (accounts && accounts.length > 0) {
         try {
-          setAccount(ethers.getAddress(accounts[0]));
+          setAccountSafely(ethers.getAddress(accounts[0]));
         } catch {
-          setAccount(accounts[0]);
+          setAccountSafely(accounts[0]);
         }
       } else {
-        setAccount("");
+        setAccountSafely("");
       }
     };
 
-    ethereum.on?.("accountsChanged", handleAccountsChanged);
+    const handleAccountsChanged = (accounts: string[]) => {
+      setNormalizedAccount(accounts);
+    };
+
+    const setupProvider = (ethereumCandidate?: any) => {
+      if (!mounted) return;
+
+      const ethereum = selectEthereumProvider(ethereumCandidate);
+
+      if (!ethereum) {
+        setHasProvider(false);
+        setProvider(null);
+        setAccountSafely("");
+        if (ethereumRef.current) {
+          ethereumRef.current.removeListener?.(
+            "accountsChanged",
+            handleAccountsChanged
+          );
+        }
+        ethereumRef.current = null;
+        return false;
+      }
+
+      if (ethereumRef.current && ethereumRef.current !== ethereum) {
+        ethereumRef.current.removeListener?.(
+          "accountsChanged",
+          handleAccountsChanged
+        );
+      }
+
+      ethereumRef.current = ethereum;
+      setHasProvider(true);
+      setProvider(new ethers.BrowserProvider(ethereum));
+
+      ethereum
+        .request?.({ method: "eth_accounts" })
+        .then((accounts: string[]) => {
+          setNormalizedAccount(accounts);
+        })
+        .catch((err: unknown) => {
+          console.error("Failed to read initial accounts", err);
+        });
+
+      ethereum.removeListener?.("accountsChanged", handleAccountsChanged);
+      ethereum.on?.("accountsChanged", handleAccountsChanged);
+      return true;
+    };
+
+    const trySetupFromWindow = () => {
+      const { ethereum } = window as typeof window & { ethereum?: any };
+      return setupProvider(ethereum);
+    };
+
+    const handleEthereumInitialized = (event?: Event) => {
+      const detail = (event as CustomEvent)?.detail;
+      if (detail && setupProvider(detail)) {
+        return;
+      }
+      trySetupFromWindow();
+    };
+
+    let pollId: number | undefined;
+    let fallbackId: number | undefined;
+
+    if (!trySetupFromWindow()) {
+      window.addEventListener(
+        "ethereum#initialized",
+        handleEthereumInitialized
+      );
+
+      pollId = window.setInterval(() => {
+        if (trySetupFromWindow()) {
+          window.removeEventListener(
+            "ethereum#initialized",
+            handleEthereumInitialized
+          );
+          if (pollId !== undefined) {
+            window.clearInterval(pollId);
+          }
+          if (fallbackId !== undefined) {
+            window.clearTimeout(fallbackId);
+          }
+        }
+      }, 400);
+
+      fallbackId = window.setTimeout(() => {
+        window.removeEventListener(
+          "ethereum#initialized",
+          handleEthereumInitialized
+        );
+        if (pollId !== undefined) {
+          window.clearInterval(pollId);
+        }
+        trySetupFromWindow();
+      }, 5000);
+    }
 
     return () => {
       mounted = false;
-      ethereum.removeListener?.("accountsChanged", handleAccountsChanged);
+      window.removeEventListener(
+        "ethereum#initialized",
+        handleEthereumInitialized
+      );
+      if (pollId !== undefined) {
+        window.clearInterval(pollId);
+      }
+      if (fallbackId !== undefined) {
+        window.clearTimeout(fallbackId);
+      }
+      const currentEthereum = ethereumRef.current;
+      currentEthereum?.removeListener?.("accountsChanged", handleAccountsChanged);
     };
   }, []);
 
   const connectWallet = useCallback(async () => {
-    if (typeof window === "undefined" || !window.ethereum) {
+    if (typeof window === "undefined") {
       alert("MetaMask not found");
       return;
     }
     try {
       setIsConnecting(true);
-      const accounts: string[] = await window.ethereum.request({
+      const injected = selectEthereumProvider(
+        ethereumRef.current ?? (window as typeof window & { ethereum?: any })
+          .ethereum
+      );
+
+      if (!injected) {
+        alert("MetaMask not found");
+        return;
+      }
+
+      const accounts: string[] = await injected.request({
         method: "eth_requestAccounts",
       });
       if (accounts && accounts.length > 0) {
@@ -249,9 +367,10 @@ export default function RahabMintSite() {
           setAccount(accounts[0]);
         }
       }
-      if (!provider) {
-        setProvider(new ethers.BrowserProvider(window.ethereum));
+      if (!provider || ethereumRef.current !== injected) {
+        setProvider(new ethers.BrowserProvider(injected));
       }
+      ethereumRef.current = injected;
       setHasProvider(true);
     } catch (err) {
       console.error("Failed to connect wallet", err);
