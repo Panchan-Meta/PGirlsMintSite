@@ -264,12 +264,10 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   const fallbackProvider = useMemo(() => getFallbackProvider(), []);
 
   const readProviders = useMemo(() => {
-    const list: ethers.Provider[] = [];
-    if (provider) list.push(provider);
-    if (fallbackProvider && fallbackProvider !== provider) {
-      list.push(fallbackProvider);
-    }
-    return list;
+    const list = new Set<ethers.Provider>();
+    if (provider) list.add(provider);
+    if (fallbackProvider) list.add(fallbackProvider);
+    return Array.from(list);
   }, [provider, fallbackProvider]);
 
   const primaryReadProvider = readProviders[0] ?? null;
