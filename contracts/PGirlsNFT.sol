@@ -55,7 +55,7 @@ contract PGirlsNFT is ERC721URIStorage, ERC2981, Ownable {
     function supportsInterface(bytes4 interfaceId)
         public
         view
-        override(ERC721, ERC2981)
+        override(ERC721URIStorage, ERC2981)
         returns (bool)
     {
         return super.supportsInterface(interfaceId);
