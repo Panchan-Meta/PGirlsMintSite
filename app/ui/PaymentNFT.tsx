@@ -3,6 +3,23 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ethers } from "ethers";
 
+const RPC_URL = (process.env.NEXT_PUBLIC_RPC_URL || "").trim();
+let sharedFallbackProvider: ethers.JsonRpcProvider | null | undefined;
+
+const getFallbackProvider = () => {
+  if (!RPC_URL) return null;
+  if (sharedFallbackProvider !== undefined) {
+    return sharedFallbackProvider;
+  }
+  try {
+    sharedFallbackProvider = new ethers.JsonRpcProvider(RPC_URL);
+  } catch (err) {
+    console.error("Failed to create fallback RPC provider", err);
+    sharedFallbackProvider = null;
+  }
+  return sharedFallbackProvider;
+};
+
 /* =========================================================
  * Props
  * =======================================================*/
@@ -244,6 +261,20 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     }
   }, [nftContractAddr]);
 
+  const fallbackProvider = useMemo(() => getFallbackProvider(), []);
+
+  const readProviders = useMemo(() => {
+    const list: ethers.Provider[] = [];
+    if (provider) list.push(provider);
+    if (fallbackProvider && fallbackProvider !== provider) {
+      list.push(fallbackProvider);
+    }
+    return list;
+  }, [provider, fallbackProvider]);
+
+  const primaryReadProvider = readProviders[0] ?? null;
+  const hasReadProvider = readProviders.length > 0;
+
   useEffect(() => {
     setCurrentOwnerAddress(ownerAddress?.trim() ?? "");
   }, [ownerAddress]);
@@ -277,15 +308,28 @@ export default function PaymentNFT(props: PaymentNFTProps) {
           if (!cancelled) setContractStatus("missing");
           return;
         }
-        if (!provider) {
+
+        if (!hasReadProvider) {
           if (!cancelled) setContractStatus("unknown");
           return;
         }
 
         if (!cancelled) setContractStatus("checking");
-        const code = await provider.getCode(normalizedNftAddress);
-        if (cancelled) return;
-        setContractStatus(code && code !== "0x" ? "ready" : "missing");
+
+        for (const runner of readProviders) {
+          try {
+            const code = await runner.getCode(normalizedNftAddress);
+            if (cancelled) return;
+            if (code && code !== "0x") {
+              setContractStatus("ready");
+              return;
+            }
+          } catch (err) {
+            console.error("Failed to fetch contract code", err);
+          }
+        }
+
+        if (!cancelled) setContractStatus("missing");
       } catch (err) {
         console.error(err);
         if (!cancelled) setContractStatus("missing");
@@ -294,7 +338,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     return () => {
       cancelled = true;
     };
-  }, [provider, normalizedNftAddress]);
+  }, [normalizedNftAddress, hasReadProvider, readProviders]);
 
   const getSigner = useCallback(async () => {
     if (!provider) return null;
@@ -313,20 +357,22 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       if (!candidate || typeof candidate !== "string") return "";
       try {
         const normalized = ethers.getAddress(candidate);
-        if (!provider) return normalized;
-        try {
-          const code = await provider.getCode(normalized);
-          if (code && code !== "0x") return normalized;
-          console.warn("Token candidate has no code", normalized);
-        } catch (e) {
-          console.error("validateCandidate getCode failed", normalized, e);
+        if (!readProviders.length) return normalized;
+        for (const runner of readProviders) {
+          try {
+            const code = await runner.getCode(normalized);
+            if (code && code !== "0x") return normalized;
+          } catch (e) {
+            console.error("validateCandidate getCode failed", normalized, e);
+          }
         }
+        console.warn("Token candidate has no code", normalized);
       } catch {
         /* ignore */
       }
       return "";
     },
-    [provider]
+    [readProviders]
   );
 
   useEffect(() => {
@@ -354,12 +400,12 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       }
 
       // 3) コントラクトに pgirlsToken があればそれを読む
-      if (provider && normalizedNftAddress) {
+      if (primaryReadProvider && normalizedNftAddress) {
         try {
           const nftRO = new ethers.Contract(
             normalizedNftAddress,
             NFT_ABI_MIN,
-            provider
+            primaryReadProvider
           );
           const onChainRaw = await nftRO.pgirlsToken().catch(() => "");
           const onChain = await validateCandidate(onChainRaw);
@@ -388,7 +434,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     validateCandidate,
     resolvedTokenAddress,
     fallbackTokenAddress,
-    provider,
+    primaryReadProvider,
     normalizedNftAddress,
   ]);
 
@@ -405,14 +451,18 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         return;
       }
       if (
-        !provider ||
+        !primaryReadProvider ||
         !normalizedNftAddress ||
         !tokenId ||
         contractStatus !== "ready"
       )
         return;
 
-      const nftRO = new ethers.Contract(normalizedNftAddress, NFT_ABI_MIN, provider);
+      const nftRO = new ethers.Contract(
+        normalizedNftAddress,
+        NFT_ABI_MIN,
+        primaryReadProvider
+      );
       let sold = false;
       try {
         const next: bigint = await nftRO.nextTokenId();
@@ -429,7 +479,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       console.error(e);
     }
   }, [
-    provider,
+    primaryReadProvider,
     normalizedNftAddress,
     tokenId,
     mintStatus,
@@ -445,11 +495,20 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   /* ---------- 残高/Allowance の読み取り ---------- */
   const refreshAllowance = useCallback(async () => {
     try {
-      if (!provider || !account || !tokenAddr || !normalizedNftAddress) {
+      if (
+        !primaryReadProvider ||
+        !account ||
+        !tokenAddr ||
+        !normalizedNftAddress
+      ) {
         setAllowanceOK(false);
         return;
       }
-      const erc20r = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, provider);
+      const erc20r = new ethers.Contract(
+        tokenAddr,
+        ERC20_ABI_MIN,
+        primaryReadProvider
+      );
       let d = 18;
       try {
         d = Number(await erc20r.decimals());
@@ -468,7 +527,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       console.error("refreshAllowance", e);
       setAllowanceOK(false);
     }
-  }, [provider, account, tokenAddr, normalizedNftAddress, activePrice]);
+  }, [primaryReadProvider, account, tokenAddr, normalizedNftAddress, activePrice]);
 
   useEffect(() => {
     refreshAllowance();
@@ -478,11 +537,15 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   useEffect(() => {
     (async () => {
       try {
-        if (!provider || !account || !tokenAddr) {
+        if (!primaryReadProvider || !account || !tokenAddr) {
           setBalance("");
           return;
         }
-        const erc20r = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, provider);
+        const erc20r = new ethers.Contract(
+          tokenAddr,
+          ERC20_ABI_MIN,
+          primaryReadProvider
+        );
         let d = 18;
         try {
           d = Number(await erc20r.decimals());
@@ -494,7 +557,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         setBalance("");
       }
     })();
-  }, [provider, account, tokenAddr]);
+  }, [primaryReadProvider, account, tokenAddr]);
 
   useEffect(() => {
     if (!account) setBalance("");
@@ -875,10 +938,10 @@ export default function PaymentNFT(props: PaymentNFTProps) {
           The metadata does not include an NFT contract address.
         </p>
       )}
-      {normalizedNftAddress && provider && contractStatus === "checking" && (
+      {normalizedNftAddress && hasReadProvider && contractStatus === "checking" && (
         <p style={{ fontSize: "0.8rem", color: "#8ecbff" }}>Checking NFT contract...</p>
       )}
-      {normalizedNftAddress && provider && contractStatus === "missing" && (
+      {normalizedNftAddress && hasReadProvider && contractStatus === "missing" && (
         <p style={{ fontSize: "0.8rem", color: "#ff8080" }}>
           Could not detect the specified NFT contract. Please check the network and
           address.
