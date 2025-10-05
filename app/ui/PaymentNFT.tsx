@@ -424,12 +424,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   const checkSoldOut = useCallback(async () => {
     try {
       if (mintStatus !== LISTED_STATUS) {
-        setIsSoldOut(false);
-        return;
-      }
-
-      if (initialSoldout) {
-        setIsSoldOut(true);
+        setIsSoldOut(Boolean(initialSoldout));
         return;
       }
       if (
@@ -470,9 +465,9 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     provider,
     normalizedNftAddress,
     tokenId,
-    initialSoldout,
     mintStatus,
     contractStatus,
+    initialSoldout,
   ]);
 
   useEffect(() => {
@@ -761,6 +756,9 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       setMintStatus(nextStatus);
       setActivePrice(nextPrice);
       setListPriceInput(nextPrice);
+      if (willList) {
+        setIsSoldOut(false);
+      }
       if (nextOwner) {
         setCurrentOwnerAddress(nextOwner);
       }

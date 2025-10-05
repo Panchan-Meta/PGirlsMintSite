@@ -4,6 +4,7 @@ import path from "path";
 
 const METADATA_DIR = path.join(process.cwd(), "metadata");
 const DEFAULT_MINT_STATUS = "BeforeList";
+const LISTED_STATUS = "Listed";
 
 function normalizeOwner(ownerAddress: unknown) {
   if (typeof ownerAddress === "string") {
@@ -43,10 +44,16 @@ export async function POST(request: Request) {
 
     const data = await loadMetadata(filePath);
 
+    let normalizedMintStatus: string | undefined;
+
     if (typeof mintStatus === "string" && mintStatus.trim()) {
-      data.mintStatus = mintStatus.trim();
+      normalizedMintStatus = mintStatus.trim();
+      data.mintStatus = normalizedMintStatus;
     } else if (!data.mintStatus) {
       data.mintStatus = DEFAULT_MINT_STATUS;
+      normalizedMintStatus = data.mintStatus;
+    } else if (typeof data.mintStatus === "string") {
+      normalizedMintStatus = data.mintStatus;
     }
 
     if (typeof price !== "undefined") {
@@ -57,6 +64,10 @@ export async function POST(request: Request) {
       } else {
         delete data.price;
       }
+    }
+
+    if ((normalizedMintStatus ?? data.mintStatus) === LISTED_STATUS) {
+      data.soldout = false;
     }
 
     if (typeof ownerAddress !== "undefined") {
