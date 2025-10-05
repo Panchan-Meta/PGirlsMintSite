@@ -1,22 +1,31 @@
 "use client";
 
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ethers } from "ethers";
 
-interface PaymentNFTProps {
+/* =========================================================
+ * Props
+ * =======================================================*/
+export interface PaymentNFTProps {
   nftContractAddr: string;
   tokenId: bigint;
+
   /** 明示アドレス（pgirlsToken() が読めない場合のフォールバック） */
   erc20Address?: string;
+
+  /** 表示＆tokenURIの組み立て用 */
   langStr: string;
   mediaUrl: string;
   price: string;
   category: string;
   fileName: string;
-  /** メタデータ由来の初期 soldout（オフチェーンフォールバック） */
+
+  /** メタデータ由来の初期値（フォールバック） */
   initialSoldout?: boolean;
   initialMintStatus?: string;
   ownerAddress?: string;
+
+  /** ウォレット */
   provider: ethers.BrowserProvider | null;
   account: string;
 }
@@ -27,18 +36,20 @@ declare global {
   }
 }
 
-/** ---------- AutoMedia: 画像/動画のURLを安全に解決 ---------- */
+/* =========================================================
+ * 画像/動画 自動解決
+ * =======================================================*/
 const guessMediaCandidates = (
   providedUrl: string | undefined,
   category: string,
   fileName: string
 ) => {
-  const baseName = fileName.replace(/\.[^.]+$/, ""); // drop extension (e.g., .json)
+  const baseName = fileName.replace(/\.[^.]+$/, ""); // drop ".json"
   const safeCat = encodeURIComponent(category);
   const safeBase = `/assets/${safeCat}/${encodeURIComponent(baseName)}`;
 
   const candidates = [
-    providedUrl, // metadata にあれば最優先
+    providedUrl, // メタデータの image/animation_url が最優先
     `${safeBase}.png`,
     `${safeBase}.jpg`,
     `${safeBase}.jpeg`,
@@ -80,11 +91,7 @@ function AutoMedia({
         loop
         playsInline
         onError={onError}
-        style={{
-          borderRadius: 12,
-          width: "100%",
-          maxWidth: width,
-        }}
+        style={{ borderRadius: 12, width: "100%", maxWidth: width }}
       />
     );
   }
@@ -93,26 +100,23 @@ function AutoMedia({
     <img
       src={url}
       alt="NFT Preview"
-      style={{
-        borderRadius: 12,
-        width: "100%",
-        maxWidth: width,
-      }}
       onError={onError}
       onContextMenu={(e) => e.preventDefault()}
       draggable={false}
+      style={{ borderRadius: 12, width: "100%", maxWidth: width }}
     />
   );
 }
 
-/** ---------- Minimal ABIs ---------- */
+/* =========================================================
+ * ABIs / 定数
+ * =======================================================*/
 const DEFAULT_MINT_STATUS = "BeforeList";
 const LISTED_STATUS = "Listed";
 
 const NFT_ABI_MIN = [
   "function nextTokenId() view returns (uint256)",
   "function ownerOf(uint256 tokenId) view returns (address)",
-  // pgirlsToken() が無いチェーン/過去デプロイでも動くよう try/catch でラップする
   "function pgirlsToken() view returns (address)",
 ] as const;
 
@@ -124,7 +128,7 @@ const NFT_ABI_WRITE = [
 
 const ERC20_ABI_MIN = [
   "function decimals() view returns (uint8)",
-  "function balanceOf(address owner) view returns (uint256)",
+  "function balanceOf(address) view returns (uint256)",
   "function allowance(address owner, address spender) view returns (uint256)",
   "function approve(address spender, uint256 amount) returns (bool)",
 ] as const;
@@ -137,41 +141,11 @@ const INSUFFICIENT_BALANCE_PATTERNS = [
   "balance too low",
 ];
 
-const ALLOWANCE_RESET_PATTERNS = [
-  "missing revert data",
-  "without a reason string",
-];
-
-async function ensureAllowance({
-  erc20,
-  user,
-  spender,
-  price,
-}: {
-  erc20: ethers.Contract;
-  user: string;
-  spender: string;
-  price: bigint;
-}) {
-  const currentAllowance: bigint = await erc20.allowance(user, spender);
-  if (currentAllowance >= price) {
-    return;
-  }
-
-  if (currentAllowance > 0n) {
-    const resetTx = await erc20.approve(spender, 0n);
-    await resetTx.wait();
-  }
-
-  const approveTx = await erc20.approve(spender, price);
-  await approveTx.wait();
-}
-
 function extractErrorMessage(error: any): string | undefined {
   if (!error) return undefined;
   if (typeof error === "string") return error;
 
-  const candidates = [
+  const cands = [
     error?.reason,
     error?.shortMessage,
     error?.data?.message,
@@ -179,43 +153,29 @@ function extractErrorMessage(error: any): string | undefined {
     error?.error?.data?.message,
     error?.message,
   ];
-
-  for (const candidate of candidates) {
-    if (typeof candidate === "string" && candidate.trim().length > 0) {
-      return candidate;
-    }
+  for (const c of cands) {
+    if (typeof c === "string" && c.trim()) return c;
   }
-
   return undefined;
 }
 
 function getFriendlyErrorMessage(error: any): string {
   const raw = extractErrorMessage(error);
-  if (!raw) return "Mint failed";
+  if (!raw) return "Transaction failed";
 
-  const normalized = raw.toLowerCase();
-
-  const matchesInsufficient = INSUFFICIENT_BALANCE_PATTERNS.some((pattern) =>
-    normalized.includes(pattern)
-  );
-
-  if (matchesInsufficient || error?.code === "INSUFFICIENT_FUNDS") {
-    return "Insufficient PGirls token balance (insufficient funds error).";
+  const lower = raw.toLowerCase();
+  if (
+    INSUFFICIENT_BALANCE_PATTERNS.some((pat) => lower.includes(pat)) ||
+    error?.code === "INSUFFICIENT_FUNDS"
+  ) {
+    return "Insufficient PGirls token balance (insufficient funds).";
   }
-
-  const matchesAllowanceReset = ALLOWANCE_RESET_PATTERNS.some((pattern) =>
-    normalized.includes(pattern)
-  );
-  if (matchesAllowanceReset) {
-    return (
-      "Approval failed. Please reset the PGirls token allowance to 0 in " +
-      "your wallet and then try approving again before minting."
-    );
-  }
-
   return raw;
 }
 
+/* =========================================================
+ * 本体
+ * =======================================================*/
 export default function PaymentNFT(props: PaymentNFTProps) {
   const {
     nftContractAddr,
@@ -233,20 +193,20 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     account,
   } = props;
 
+  /* ---------- ベース状態 ---------- */
   const [minting, setMinting] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [isSoldOut, setIsSoldOut] = useState<boolean>(!!initialSoldout);
+
   const fallbackTokenAddress = useMemo(() => {
-    if (!erc20Address || typeof erc20Address !== "string") {
-      return "";
-    }
+    if (!erc20Address || typeof erc20Address !== "string") return "";
     try {
       return ethers.getAddress(erc20Address);
-    } catch (err) {
-      console.error("Invalid fallback ERC20 address", erc20Address, err);
+    } catch {
       return "";
     }
   }, [erc20Address]);
+
   const [resolvedTokenAddress, setResolvedTokenAddress] = useState<string>("");
   const [balance, setBalance] = useState<string>("");
   const [currentOwnerAddress, setCurrentOwnerAddress] = useState<string>(
@@ -258,18 +218,24 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   const [activePrice, setActivePrice] = useState<string>(price);
   const [listPriceInput, setListPriceInput] = useState<string>(price);
   const [updatingListing, setUpdatingListing] = useState<boolean>(false);
-  const [contractStatus, setContractStatus] = useState<
-    "unknown" | "checking" | "ready" | "missing"
-  >("unknown");
-  const [autoApproveState, setAutoApproveState] = useState<
-    "idle" | "pending" | "succeeded" | "failed"
-  >("idle");
-  const [lastAutoApproveKey, setLastAutoApproveKey] = useState<string>("");
 
+  type ReadyState = "unknown" | "checking" | "ready" | "missing";
+  const [contractStatus, setContractStatus] = useState<ReadyState>("unknown");
+
+  /* ---------- Allowance / Approve 制御 ---------- */
+  const [decimalsGuess, setDecimalsGuess] = useState<number>(18);
+  const [allowanceOK, setAllowanceOK] = useState<boolean>(false);
+  const [approving, setApproving] = useState<boolean>(false);
+
+  /* ---------- Token 解決 ---------- */
+  const [tokenAddr, setTokenAddr] = useState<string>("");
+  const [tokenStatus, setTokenStatus] = useState<
+    "unknown" | "resolving" | "resolved" | "missing"
+  >("unknown");
+
+  /* ---------- 各種ユーティリティ ---------- */
   const normalizedNftAddress = useMemo(() => {
-    if (!nftContractAddr || typeof nftContractAddr !== "string") {
-      return "";
-    }
+    if (!nftContractAddr || typeof nftContractAddr !== "string") return "";
     try {
       return ethers.getAddress(nftContractAddr);
     } catch (err) {
@@ -295,44 +261,36 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     process.env.NEXT_PUBLIC_PGIRLSCHAIN_EXPLORER ||
     "https://explorer.rahabpunkaholicgirls.com";
 
+  const isOwner = useMemo(() => {
+    if (!account || !currentOwnerAddress) return false;
+    return (
+      account.trim().toLowerCase() === currentOwnerAddress.trim().toLowerCase()
+    );
+  }, [account, currentOwnerAddress]);
+
+  /* ---------- コントラクト存在チェック ---------- */
   useEffect(() => {
     let cancelled = false;
-
     (async () => {
       try {
         if (!normalizedNftAddress) {
-          if (!cancelled) {
-            setContractStatus("missing");
-          }
+          if (!cancelled) setContractStatus("missing");
           return;
         }
-
         if (!provider) {
-          if (!cancelled) {
-            setContractStatus("unknown");
-          }
+          if (!cancelled) setContractStatus("unknown");
           return;
         }
 
-        if (!cancelled) {
-          setContractStatus("checking");
-        }
-
+        if (!cancelled) setContractStatus("checking");
         const code = await provider.getCode(normalizedNftAddress);
         if (cancelled) return;
-        if (code && code !== "0x") {
-          setContractStatus("ready");
-        } else {
-          setContractStatus("missing");
-        }
+        setContractStatus(code && code !== "0x" ? "ready" : "missing");
       } catch (err) {
         console.error(err);
-        if (!cancelled) {
-          setContractStatus("missing");
-        }
+        if (!cancelled) setContractStatus("missing");
       }
     })();
-
     return () => {
       cancelled = true;
     };
@@ -343,59 +301,29 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     return provider.getSigner();
   }, [provider]);
 
-  const [tokenAddr, setTokenAddr] = useState<string>("");
-  const [tokenStatus, setTokenStatus] = useState<
-    "unknown" | "resolving" | "resolved" | "missing"
-  >("unknown");
-  const autoApproveKey = useMemo(() => {
-    const trimmedPrice = (activePrice || "").trim();
-    if (
-      !account ||
-      !tokenAddr ||
-      !normalizedNftAddress ||
-      !trimmedPrice ||
-      mintStatus !== LISTED_STATUS
-    ) {
-      return "";
-    }
-    return `${account.toLowerCase()}-${tokenAddr}-${normalizedNftAddress}-${trimmedPrice}`;
-  }, [account, tokenAddr, normalizedNftAddress, activePrice, mintStatus]);
+  const requireSigner = useCallback(async () => {
+    const s = await getSigner();
+    if (!s) throw new Error("No signer");
+    return s;
+  }, [getSigner]);
 
-  const isOwner = useMemo(() => {
-    if (!account || !currentOwnerAddress) return false;
-    return (
-      account.trim().toLowerCase() === currentOwnerAddress.trim().toLowerCase()
-    );
-  }, [account, currentOwnerAddress]);
-
+  /* ---------- ERC20 アドレス解決 ---------- */
   const validateCandidate = useCallback(
     async (candidate: string | undefined | null) => {
-      if (!candidate || typeof candidate !== "string") {
-        return "";
-      }
-
+      if (!candidate || typeof candidate !== "string") return "";
       try {
         const normalized = ethers.getAddress(candidate);
-        if (!provider) {
-          return normalized;
-        }
-
+        if (!provider) return normalized;
         try {
           const code = await provider.getCode(normalized);
-          if (code && code !== "0x") {
-            return normalized;
-          }
-          console.warn(
-            "Resolved PGirls token candidate has no contract code",
-            normalized
-          );
-        } catch (codeErr) {
-          console.error("Failed to validate ERC20 candidate", normalized, codeErr);
+          if (code && code !== "0x") return normalized;
+          console.warn("Token candidate has no code", normalized);
+        } catch (e) {
+          console.error("validateCandidate getCode failed", normalized, e);
         }
-      } catch (err) {
-        console.error("Invalid ERC20 candidate", candidate, err);
+      } catch {
+        /* ignore */
       }
-
       return "";
     },
     [provider]
@@ -403,11 +331,10 @@ export default function PaymentNFT(props: PaymentNFTProps) {
 
   useEffect(() => {
     let cancelled = false;
-
     (async () => {
-      if (!cancelled) {
-        setTokenStatus("resolving");
-      }
+      if (!cancelled) setTokenStatus("resolving");
+
+      // 1) 既に解決済みを再検証
       const resolved = await validateCandidate(resolvedTokenAddress);
       if (!cancelled && resolved) {
         setTokenAddr(resolved);
@@ -415,6 +342,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         return;
       }
 
+      // 2) フォールバック（メタデータ由来）
       const fallback = await validateCandidate(fallbackTokenAddress);
       if (!cancelled && fallback) {
         if (fallback !== resolvedTokenAddress) {
@@ -425,32 +353,27 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         return;
       }
 
-      if (!provider || !normalizedNftAddress) {
-        if (!cancelled) {
-          setTokenAddr("");
-          setTokenStatus(fallbackTokenAddress ? "resolving" : "missing");
-        }
-        return;
-      }
-
-      try {
-        const nftRO = new ethers.Contract(
-          normalizedNftAddress,
-          NFT_ABI_MIN,
-          provider
-        );
-        const onChainRaw = await nftRO.pgirlsToken().catch(() => "");
-        const onChain = await validateCandidate(onChainRaw);
-        if (!cancelled && onChain) {
-          if (onChain !== resolvedTokenAddress) {
-            setResolvedTokenAddress(onChain);
+      // 3) コントラクトに pgirlsToken があればそれを読む
+      if (provider && normalizedNftAddress) {
+        try {
+          const nftRO = new ethers.Contract(
+            normalizedNftAddress,
+            NFT_ABI_MIN,
+            provider
+          );
+          const onChainRaw = await nftRO.pgirlsToken().catch(() => "");
+          const onChain = await validateCandidate(onChainRaw);
+          if (!cancelled && onChain) {
+            if (onChain !== resolvedTokenAddress) {
+              setResolvedTokenAddress(onChain);
+            }
+            setTokenAddr(onChain);
+            setTokenStatus("resolved");
+            return;
           }
-          setTokenAddr(onChain);
-          setTokenStatus("resolved");
-          return;
+        } catch (err) {
+          console.error("resolve token via nft failed", err);
         }
-      } catch (err) {
-        console.error("Failed to resolve ERC20 via NFT", err);
       }
 
       if (!cancelled) {
@@ -458,7 +381,6 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         setTokenStatus("missing");
       }
     })();
-
     return () => {
       cancelled = true;
     };
@@ -470,14 +392,13 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     normalizedNftAddress,
   ]);
 
-  /** ---------- On-chain + Off-chain soldout check ---------- */
+  /* ---------- 売切れ判定（オンチェーン + フォールバック） ---------- */
   const checkSoldOut = useCallback(async () => {
     try {
       if (mintStatus !== LISTED_STATUS) {
         setIsSoldOut(Boolean(initialSoldout));
         return;
       }
-
       const priceValue = (activePrice || "").trim();
       if (priceValue) {
         setIsSoldOut(false);
@@ -490,32 +411,22 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         contractStatus !== "ready"
       )
         return;
-      const nftRO = new ethers.Contract(
-        normalizedNftAddress,
-        NFT_ABI_MIN,
-        provider
-      );
 
+      const nftRO = new ethers.Contract(normalizedNftAddress, NFT_ABI_MIN, provider);
       let sold = false;
       try {
         const next: bigint = await nftRO.nextTokenId();
         if (tokenId < next) sold = true;
-      } catch (err) {
-        console.error(err);
-      }
-
+      } catch (e) {}
       if (!sold) {
         try {
           await nftRO.ownerOf(tokenId);
           sold = true;
-        } catch (err) {
-          console.error(err);
-        }
+        } catch (e) {}
       }
       setIsSoldOut(sold);
-    } catch (err) {
-      console.error(err);
-      // keep previous
+    } catch (e) {
+      console.error(e);
     }
   }, [
     provider,
@@ -531,245 +442,191 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     checkSoldOut();
   }, [checkSoldOut]);
 
-  useEffect(() => {
-    if (!autoApproveKey) {
-      if (autoApproveState !== "idle") {
-        setAutoApproveState("idle");
+  /* ---------- 残高/Allowance の読み取り ---------- */
+  const refreshAllowance = useCallback(async () => {
+    try {
+      if (!provider || !account || !tokenAddr || !normalizedNftAddress) {
+        setAllowanceOK(false);
+        return;
       }
-      if (lastAutoApproveKey !== "") {
-        setLastAutoApproveKey("");
-      }
-      return;
-    }
-
-    if (isOwner) {
-      if (autoApproveState !== "idle") {
-        setAutoApproveState("idle");
-      }
-      if (lastAutoApproveKey !== "") {
-        setLastAutoApproveKey("");
-      }
-      return;
-    }
-
-    if (
-      autoApproveState === "pending" ||
-      lastAutoApproveKey === autoApproveKey ||
-      !provider ||
-      !account ||
-      !tokenAddr ||
-      !normalizedNftAddress ||
-      tokenStatus !== "resolved" ||
-      contractStatus !== "ready" ||
-      mintStatus !== LISTED_STATUS
-    ) {
-      return;
-    }
-
-    let cancelled = false;
-
-    const runAutoApprove = async () => {
-      setAutoApproveState("pending");
+      const erc20r = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, provider);
+      let d = 18;
       try {
-        const signer = await getSigner();
-        if (!signer) {
-          throw new Error("No signer");
-        }
+        d = Number(await erc20r.decimals());
+      } catch {}
+      setDecimalsGuess(Number.isFinite(d) ? d : 18);
 
-        const erc20 = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, signer);
-        let decimals = 18;
-        try {
-          const rawDecimals = await erc20.decimals();
-          const parsedDecimals = Number(rawDecimals);
-          if (Number.isFinite(parsedDecimals)) {
-            decimals = parsedDecimals;
-          }
-        } catch (decimalsErr) {
-          console.error(decimalsErr);
-        }
-
-        const trimmedPrice = (activePrice || "").trim();
-        if (!trimmedPrice) {
-          throw new Error("Listing price is missing");
-        }
-
-        const parsedPrice = ethers.parseUnits(trimmedPrice, decimals);
-        const ownerAddr = await signer.getAddress();
-
-        await ensureAllowance({
-          erc20,
-          user: ownerAddr,
-          spender: normalizedNftAddress,
-          price: parsedPrice,
-        });
-
-        if (!cancelled) {
-          setAutoApproveState("succeeded");
-          setLastAutoApproveKey(autoApproveKey);
-        }
-      } catch (err) {
-        console.error("Automatic approval failed", err);
-        if (!cancelled) {
-          setLastAutoApproveKey(autoApproveKey);
-          setAutoApproveState("failed");
-        }
+      const priceStr = (activePrice || "").trim();
+      if (!priceStr) {
+        setAllowanceOK(false);
+        return;
       }
-    };
+      const need = ethers.parseUnits(priceStr, d);
+      const cur: bigint = await erc20r.allowance(account, normalizedNftAddress);
+      setAllowanceOK(cur >= need);
+    } catch (e) {
+      console.error("refreshAllowance", e);
+      setAllowanceOK(false);
+    }
+  }, [provider, account, tokenAddr, normalizedNftAddress, activePrice]);
 
-    runAutoApprove();
+  useEffect(() => {
+    refreshAllowance();
+  }, [refreshAllowance]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    autoApproveKey,
-    autoApproveState,
-    lastAutoApproveKey,
-    provider,
-    account,
-    tokenAddr,
-    normalizedNftAddress,
-    tokenStatus,
-    contractStatus,
-    mintStatus,
-    isOwner,
-    getSigner,
-    activePrice,
-  ]);
-
-  /** 残高の読み取り（アカウント/トークン変更時） */
+  // 残高
   useEffect(() => {
     (async () => {
       try {
-
-        if (!provider || !account || !tokenAddr) return;
-        const erc20r = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, provider);
-        let decimals = 18;
-        try {
-          decimals = Number(await erc20r.decimals());
-        } catch (decimalsErr) {
-          console.error(decimalsErr);
+        if (!provider || !account || !tokenAddr) {
+          setBalance("");
+          return;
         }
+        const erc20r = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, provider);
+        let d = 18;
+        try {
+          d = Number(await erc20r.decimals());
+        } catch {}
         const raw = await erc20r.balanceOf(account);
-        setBalance(ethers.formatUnits(raw, decimals));
-      } catch (balanceErr) {
-        console.error(balanceErr);
+        setBalance(ethers.formatUnits(raw, d));
+      } catch (e) {
+        console.error("balance refresh", e);
+        setBalance("");
       }
     })();
   }, [provider, account, tokenAddr]);
 
   useEffect(() => {
-    if (!account) {
-      setBalance("");
-    }
+    if (!account) setBalance("");
   }, [account]);
 
   const getOwnerFromMetadata = useCallback((metadata: any) => {
     if (!metadata || typeof metadata !== "object") return "";
-    const candidate =
+    const cand =
       metadata.ownerAddress || metadata.owner || metadata.walletAddress || "";
-    return typeof candidate === "string" ? candidate.trim() : "";
+    return typeof cand === "string" ? cand.trim() : "";
   }, []);
 
-  /** ---------- Mint ---------- */
+  /* ---------- Approve / Mint （二重起動禁止） ---------- */
+  const txMutexRef = useRef<Promise<any> | null>(null);
+  const isAlreadyPending = (e: any) =>
+    e?.code === -32002 ||
+    (typeof e?.message === "string" && /request.*pending/i.test(e.message));
+
+  const handleApprove = useCallback(async () => {
+    if (approving || allowanceOK) return;
+    if (txMutexRef.current) return;
+    try {
+      setApproving(true);
+      const signer = await requireSigner();
+      if (!tokenAddr) throw new Error("Missing PGirls token address");
+      if (!normalizedNftAddress) throw new Error("NFT contract address is missing");
+
+      const erc20 = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, signer);
+      let d = decimalsGuess;
+      try {
+        d = Number(await erc20.decimals());
+      } catch {}
+
+      const priceStr = (activePrice || "").trim();
+      if (!priceStr) throw new Error("Listing price is missing");
+      const need = ethers.parseUnits(priceStr, d);
+
+      const owner = await signer.getAddress();
+      const current: bigint = await erc20.allowance(owner, normalizedNftAddress);
+
+      const run = async () => {
+        // 非0→非0 を避ける（USDT対策）
+        if (current > 0n && current < need) {
+          const tx0 = await erc20.approve(normalizedNftAddress, 0n);
+          await tx0.wait();
+        }
+        const tx = await erc20.approve(normalizedNftAddress, need);
+        await tx.wait();
+      };
+
+      txMutexRef.current = run();
+      await txMutexRef.current;
+      await refreshAllowance();
+    } catch (e: any) {
+      if (isAlreadyPending(e)) {
+        alert("MetaMask で保留中の確認があります。アプリを切り替えて承認/拒否してください。");
+      } else {
+        console.error(e);
+        alert(getFriendlyErrorMessage(e));
+      }
+    } finally {
+      txMutexRef.current = null;
+      setApproving(false);
+    }
+  }, [
+    approving,
+    allowanceOK,
+    requireSigner,
+    tokenAddr,
+    decimalsGuess,
+    activePrice,
+    normalizedNftAddress,
+    refreshAllowance,
+  ]);
+
   const handleMint = useCallback(async () => {
     if (minting || isSoldOut || mintStatus !== LISTED_STATUS || isOwner) return;
+    if (!allowanceOK) {
+      alert("先に Approve を完了してください。");
+      return;
+    }
+    if (txMutexRef.current) return;
+
     try {
       setMinting(true);
       setTxHash(null);
+
       if (!provider) throw new Error("No provider");
-      if (!normalizedNftAddress) {
-        throw new Error("NFT contract address is not set.");
-      }
-      if (contractStatus !== "ready") {
-        throw new Error("NFT contract deployment could not be confirmed.");
-      }
-      const signer = await getSigner();
-      if (!signer) throw new Error("No signer");
+      if (!normalizedNftAddress) throw new Error("NFT contract address is not set.");
+      if (contractStatus !== "ready") throw new Error("NFT contract not deployed.");
 
-      if (!tokenAddr) throw new Error("Missing PGirls token address");
+      const signer = await requireSigner();
 
-      const erc20 = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, signer);
-      let decimals = 18;
+      const erc20r = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, provider);
+      let d = decimalsGuess;
       try {
-        decimals = Number(await erc20.decimals());
-      } catch (err) {
-        console.error(err);
-      }
+        d = Number(await erc20r.decimals());
+      } catch {}
 
-      const priceValue = (activePrice || "").trim();
-      if (!priceValue) {
-        throw new Error("Listing price is missing");
-      }
+      const priceStr = (activePrice || "").trim();
+      if (!priceStr) throw new Error("Listing price is missing");
+      const need = ethers.parseUnits(priceStr, d);
 
-      const parsedPrice = ethers.parseUnits(priceValue, decimals);
       const ownerAddr = await signer.getAddress();
-      const normalizedOwnerAddr = ownerAddr.trim();
-
-      const balanceRaw: bigint = await erc20.balanceOf(ownerAddr);
-      if (balanceRaw < parsedPrice) {
-        const requiredAmount = ethers.formatUnits(parsedPrice, decimals);
+      const bal: bigint = await erc20r.balanceOf(ownerAddr);
+      if (bal < need) {
         throw new Error(
-          `Insufficient PGirls token balance. Required amount: ${requiredAmount}`
+          `Insufficient PGirls token balance. Required: ${ethers.formatUnits(
+            need,
+            d
+          )}`
         );
       }
 
-      await ensureAllowance({
-        erc20,
-        user: ownerAddr,
-        spender: normalizedNftAddress,
-        price: parsedPrice,
-      });
+      const nft = new ethers.Contract(normalizedNftAddress, NFT_ABI_WRITE, signer);
 
-      // Re-read allowance to ensure the approval actually succeeded before minting.
-      const updatedAllowance: bigint = await erc20.allowance(
-        ownerAddr,
-        normalizedNftAddress
-      );
-      if (updatedAllowance < parsedPrice) {
-        throw new Error(
-          "Approval transaction completed but allowance is still insufficient. Please retry."
-        );
-      }
+      // tokenURI（相対パスで API が解決する前提。必要に応じて絶対URLに変更）
+      const padded = tokenId.toString().padStart(3, "0");
+      const tokenURI = `/metadata/${langStr}/${padded}.json`;
 
-      const nft = new ethers.Contract(
-        normalizedNftAddress,
-        NFT_ABI_WRITE,
-        signer
-      );
+      const run = async () => {
+        const tx = await nft.buy(need, tokenURI);
+        const receipt = await tx.wait();
+        setTxHash(receipt?.hash ?? tx.hash);
+      };
 
-      // 既存パターン: /metadata/<lang>/<paddedId>.json
-      const paddedTokenId = tokenId.toString().padStart(3, "0");
-      const tokenURI = `/metadata/${langStr}/${paddedTokenId}.json`;
+      txMutexRef.current = run();
+      await txMutexRef.current;
 
-      const tx = await nft.buy(parsedPrice, tokenURI);
-      const receipt = await tx.wait();
-      setTxHash(receipt?.hash ?? tx.hash);
-
-      // ★ 即時反映：UI上で初期状態に戻す
-      setIsSoldOut(false);
-      if (normalizedOwnerAddr) {
-        setCurrentOwnerAddress(normalizedOwnerAddr);
-      }
-
-      // 残高更新
+      // 後処理（メタデータ側へも反映）
       try {
-        const erc20r = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, provider);
-        let d = 18;
-        try {
-          d = Number(await erc20r.decimals());
-        } catch (err) {
-          console.error(err);
-        }
-        const raw = await erc20r.balanceOf(ownerAddr);
-        setBalance(ethers.formatUnits(raw, d));
-      } catch (balanceRefreshErr) {
-        console.error(balanceRefreshErr);
-      }
-
-      // ---- メタデータ側にも soldout を反映（フォールバック） ----
-      try {
-        const response = await fetch(`/api/updateListing`, {
+        const res = await fetch(`/api/updateListing`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -777,69 +634,74 @@ export default function PaymentNFT(props: PaymentNFTProps) {
             fileName,
             mintStatus: DEFAULT_MINT_STATUS,
             price: "",
-            ownerAddress: normalizedOwnerAddr,
+            ownerAddress: ownerAddr,
           }),
         });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          throw new Error(payload.error || "Failed to reset listing");
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(payload?.error || "Failed to reset listing");
         }
         const metadata = (payload as any)?.metadata ?? {};
-        const ownerFromMetadata = getOwnerFromMetadata(metadata);
-        if (ownerFromMetadata) {
-          setCurrentOwnerAddress(ownerFromMetadata);
-        }
-      } catch (err) {
-        console.error(err);
+        const ownerFromMeta = getOwnerFromMetadata(metadata);
+        if (ownerFromMeta) setCurrentOwnerAddress(ownerFromMeta);
+      } catch (e) {
+        console.error(e);
       }
 
       setMintStatus(DEFAULT_MINT_STATUS);
       setActivePrice("");
       setListPriceInput("");
       await checkSoldOut();
+
+      // 残高を更新
+      try {
+        const raw = await erc20r.balanceOf(ownerAddr);
+        setBalance(ethers.formatUnits(raw, d));
+      } catch {}
     } catch (e: any) {
-      console.error(e);
-      alert(getFriendlyErrorMessage(e));
+      if (isAlreadyPending(e)) {
+        alert("MetaMask の確認待ちです。アプリを切り替えて承認してください。");
+      } else {
+        console.error(e);
+        alert(getFriendlyErrorMessage(e));
+      }
     } finally {
+      txMutexRef.current = null;
       setMinting(false);
     }
   }, [
     minting,
     isSoldOut,
+    mintStatus,
     isOwner,
+    allowanceOK,
     provider,
-    getSigner,
     normalizedNftAddress,
+    contractStatus,
+    requireSigner,
+    tokenAddr,
+    decimalsGuess,
     activePrice,
     langStr,
     tokenId,
     category,
     fileName,
-    mintStatus,
-    checkSoldOut,
     getOwnerFromMetadata,
-    contractStatus,
-
+    checkSoldOut,
   ]);
 
+  /* ---------- リスティング更新（オーナーのみ） ---------- */
   const handlePriceChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const value = e.target.value;
-      const sanitized = value
-        .replace(/[^\d.]/g, "")
-        .replace(/(\..*)\./g, "$1");
+      const sanitized = value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1");
       setListPriceInput(sanitized);
-      if (mintStatus !== LISTED_STATUS) {
-        setActivePrice(sanitized);
-      }
+      if (mintStatus !== LISTED_STATUS) setActivePrice(sanitized);
     },
     [mintStatus]
   );
 
-  const canList = useMemo(() => {
-    if (!isOwner) return false;
-    return true;
-  }, [isOwner]);
+  const canList = useMemo(() => isOwner, [isOwner]);
 
   const shouldShowListingControls = useMemo(() => {
     if (canList) return true;
@@ -849,9 +711,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   const disableListingButton = useMemo(() => {
     if (updatingListing || !canList) return true;
     const trimmed = listPriceInput.trim();
-    if (mintStatus !== LISTED_STATUS) {
-      return trimmed.length === 0;
-    }
+    if (mintStatus !== LISTED_STATUS) return trimmed.length === 0;
     return false;
   }, [updatingListing, canList, listPriceInput, mintStatus]);
 
@@ -860,16 +720,13 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       alert("Only the owner can update the listing");
       return;
     }
-
     const trimmed = listPriceInput.trim();
     const willList = trimmed.length > 0;
-    if (!willList && mintStatus !== LISTED_STATUS) {
-      return;
-    }
+    if (!willList && mintStatus !== LISTED_STATUS) return;
 
     setUpdatingListing(true);
     try {
-      const response = await fetch(`/api/updateListing`, {
+      const res = await fetch(`/api/updateListing`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -879,11 +736,10 @@ export default function PaymentNFT(props: PaymentNFTProps) {
           price: trimmed,
         }),
       });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
         throw new Error(payload?.error || "Failed to update listing");
       }
-
       const metadata = (payload as any)?.metadata ?? {};
       const rawStatus =
         typeof metadata.mintStatus === "string" ? metadata.mintStatus : undefined;
@@ -902,30 +758,18 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       setMintStatus(nextStatus);
       setActivePrice(nextPrice);
       setListPriceInput(nextPrice);
-      if (willList) {
-        setIsSoldOut(false);
-      }
-      if (nextOwner) {
-        setCurrentOwnerAddress(nextOwner);
-      }
-      if (!willList) {
-        setIsSoldOut(false);
-      }
-    } catch (err: any) {
-      console.error(err);
-      alert(err?.message || "Failed to update listing");
+      if (willList) setIsSoldOut(false);
+      if (nextOwner) setCurrentOwnerAddress(nextOwner);
+      if (!willList) setIsSoldOut(false);
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || "Failed to update listing");
     } finally {
       setUpdatingListing(false);
     }
-  }, [
-    canList,
-    listPriceInput,
-    mintStatus,
-    category,
-    fileName,
-    getOwnerFromMetadata,
-  ]);
+  }, [canList, listPriceInput, mintStatus, category, fileName, getOwnerFromMetadata]);
 
+  /* ---------- ボタン状態/ラベル ---------- */
   const displayButtonLabel = useMemo(() => {
     if (minting) return "Processing...";
     if (!provider) return "Wallet Not Found";
@@ -939,19 +783,21 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     if (isSoldOut) return "Sold Out";
     if (mintStatus !== LISTED_STATUS) return "Not Listed";
     if (!activePrice) return "No Price";
+    if (!allowanceOK) return "Approve Required";
     return "Mint";
-    }, [
-      minting,
-      provider,
-      account,
-      normalizedNftAddress,
-      contractStatus,
-      tokenStatus,
-      isSoldOut,
-      mintStatus,
-      activePrice,
-      isOwner,
-    ]);
+  }, [
+    minting,
+    provider,
+    account,
+    normalizedNftAddress,
+    contractStatus,
+    tokenStatus,
+    isOwner,
+    isSoldOut,
+    mintStatus,
+    activePrice,
+    allowanceOK,
+  ]);
 
   const isDisabled = useMemo(
     () =>
@@ -964,7 +810,8 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       mintStatus !== LISTED_STATUS ||
       !activePrice ||
       isSoldOut ||
-      isOwner,
+      isOwner ||
+      !allowanceOK,
     [
       minting,
       provider,
@@ -976,9 +823,11 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       activePrice,
       isSoldOut,
       isOwner,
+      allowanceOK,
     ]
   );
 
+  /* ---------- Render ---------- */
   const formattedTokenId = useMemo(() => tokenId.toString(), [tokenId]);
   const displayNftAddress = useMemo(
     () => normalizedNftAddress || "-",
@@ -1010,7 +859,8 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       <p style={{ fontSize: "0.85rem", color: "#ccc" }}>
         Connected Wallet: {account || "-"}
       </p>
-      {canList ? (
+
+      {isOwner ? (
         <p style={{ fontSize: "0.85rem", color: "#8ecbff" }}>
           You own this NFT. PGirls balance: {balance || "0"}
         </p>
@@ -1026,14 +876,12 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         </p>
       )}
       {normalizedNftAddress && provider && contractStatus === "checking" && (
-        <p style={{ fontSize: "0.8rem", color: "#8ecbff" }}>
-          Checking NFT contract...
-        </p>
+        <p style={{ fontSize: "0.8rem", color: "#8ecbff" }}>Checking NFT contract...</p>
       )}
       {normalizedNftAddress && provider && contractStatus === "missing" && (
         <p style={{ fontSize: "0.8rem", color: "#ff8080" }}>
-          Could not detect the specified NFT contract. Please check the network
-          and address.
+          Could not detect the specified NFT contract. Please check the network and
+          address.
         </p>
       )}
 
@@ -1044,30 +892,22 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       )}
       {tokenStatus === "missing" && (
         <p style={{ fontSize: "0.8rem", color: "#ff8080" }}>
-          Unable to determine the PGirls token contract. Please refresh after
-          verifying the metadata.
+          Unable to determine the PGirls token contract. Please refresh after verifying
+          the metadata.
         </p>
       )}
-      {autoApproveState === "pending" && (
-        <p style={{ fontSize: "0.8rem", color: "#8ecbff" }}>
-          Automatically approving PGirls token spending...
+      {!allowanceOK && tokenStatus === "resolved" && !isOwner && (
+        <p style={{ fontSize: "0.8rem", color: "#ffcf80" }}>
+          Approval is required before minting.
         </p>
       )}
-      {autoApproveState === "failed" && (
-        <p style={{ fontSize: "0.8rem", color: "#ff8080" }}>
-          Automatic approval failed. You may need to retry minting manually.
-        </p>
-      )}
-      {autoApproveState === "succeeded" && (
-        <p style={{ fontSize: "0.8rem", color: "#8ecbff" }}>
-          PGirls token allowance is ready for minting.
-        </p>
-      )}
+
       <p style={{ fontSize: "0.8rem", color: "#ccc", wordBreak: "break-all" }}>
         NFT Contract: {displayNftAddress}
       </p>
       <p style={{ fontSize: "0.8rem", color: "#ccc" }}>Token ID: {formattedTokenId}</p>
 
+      {/* List/Update controls (owner only, もしくは未売切れ時に表示) */}
       {shouldShowListingControls && (
         <div
           style={{
@@ -1102,13 +942,11 @@ export default function PaymentNFT(props: PaymentNFTProps) {
             disabled={disableListingButton}
             style={{
               padding: "0.5rem 1rem",
-              backgroundColor:
-                disableListingButton ? "#444" : "#28a745",
+              backgroundColor: disableListingButton ? "#444" : "#28a745",
               color: "white",
               border: "none",
               borderRadius: "6px",
-              cursor:
-                disableListingButton ? "not-allowed" : "pointer",
+              cursor: disableListingButton ? "not-allowed" : "pointer",
             }}
           >
             {mintStatus === LISTED_STATUS ? "Update Listing" : "List for Sale"}
@@ -1116,6 +954,49 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         </div>
       )}
 
+      {/* Approve ボタン（必要な時だけ） */}
+      {mintStatus === LISTED_STATUS &&
+        !isOwner &&
+        !isSoldOut &&
+        activePrice &&
+        tokenStatus === "resolved" && (
+          <div
+            style={{
+              marginTop: "0.75rem",
+              display: "flex",
+              gap: 8,
+              justifyContent: "center",
+              alignItems: "center",
+            }}
+          >
+            {!allowanceOK ? (
+              <button
+                onClick={handleApprove}
+                disabled={
+                  approving ||
+                  !provider ||
+                  !account ||
+                  contractStatus !== "ready" ||
+                  tokenStatus !== "resolved"
+                }
+                style={{
+                  padding: "0.6rem 1.2rem",
+                  backgroundColor: approving ? "#444" : "#28a745",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 8,
+                  cursor: approving ? "not-allowed" : "pointer",
+                }}
+              >
+                {approving ? "Approving..." : "Approve PGirls"}
+              </button>
+            ) : (
+              <div style={{ fontSize: 12, color: "#8ecbff" }}>Allowance is ready</div>
+            )}
+          </div>
+        )}
+
+      {/* Mint ボタン */}
       <button
         onClick={handleMint}
         disabled={isDisabled}
@@ -1142,11 +1023,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
           }}
         >
           Tx Hash:{" "}
-          <a
-            href={`${explorerBase}/tx/${txHash}`}
-            target="_blank"
-            rel="noreferrer"
-          >
+          <a href={`${explorerBase}/tx/${txHash}`} target="_blank" rel="noreferrer">
             {txHash}
           </a>{" "}
           (
@@ -1159,3 +1036,4 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     </div>
   );
 }
+
