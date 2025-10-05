@@ -76,12 +76,15 @@ function AutoMedia({
     return (
       <video
         src={url}
-        width={width}
         controls
         loop
         playsInline
         onError={onError}
-        style={{ borderRadius: 12 }}
+        style={{
+          borderRadius: 12,
+          width: "100%",
+          maxWidth: width,
+        }}
       />
     );
   }
@@ -90,8 +93,11 @@ function AutoMedia({
     <img
       src={url}
       alt="NFT Preview"
-      width={width}
-      style={{ borderRadius: 12 }}
+      style={{
+        borderRadius: 12,
+        width: "100%",
+        maxWidth: width,
+      }}
       onError={onError}
       onContextMenu={(e) => e.preventDefault()}
       draggable={false}
@@ -825,8 +831,26 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     ]
   );
 
+  const formattedTokenId = useMemo(() => tokenId.toString(), [tokenId]);
+  const displayNftAddress = useMemo(
+    () => normalizedNftAddress || "-",
+    [normalizedNftAddress]
+  );
+
   return (
-    <div style={{ textAlign: "center" }}>
+    <div
+      style={{
+        textAlign: "center",
+        background: "#101010",
+        borderRadius: "20px",
+        padding: "1.25rem",
+        width: "100%",
+        maxWidth: "420px",
+        margin: "0 auto",
+        boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+        boxSizing: "border-box",
+      }}
+    >
       <AutoMedia providedUrl={mediaUrl} category={category} fileName={fileName} />
 
       <p style={{ fontSize: "0.9rem", color: "#ccc" }}>
@@ -876,11 +900,10 @@ export default function PaymentNFT(props: PaymentNFTProps) {
           verifying the metadata.
         </p>
       )}
-      {tokenStatus === "resolved" && tokenAddr && (
-        <p style={{ fontSize: "0.8rem", color: "#ccc" }}>
-          PGirls token: {tokenAddr}
-        </p>
-      )}
+      <p style={{ fontSize: "0.8rem", color: "#ccc", wordBreak: "break-all" }}>
+        NFT Contract: {displayNftAddress}
+      </p>
+      <p style={{ fontSize: "0.8rem", color: "#ccc" }}>Token ID: {formattedTokenId}</p>
 
       {!isSoldOut && (
         <div
@@ -948,7 +971,12 @@ export default function PaymentNFT(props: PaymentNFTProps) {
 
       {txHash && (
         <p
-          style={{ marginTop: "0.5rem", fontSize: "0.85em", color: "lightgreen" }}
+          style={{
+            marginTop: "0.5rem",
+            fontSize: "0.85em",
+            color: "lightgreen",
+            wordBreak: "break-all",
+          }}
         >
           Tx Hash:{" "}
           <a

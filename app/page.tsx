@@ -313,11 +313,14 @@ export default function RahabMintSite() {
   return (
     <main
       style={{
-        padding: "2rem",
+        padding: "2rem 1.25rem",
         fontFamily: "sans-serif",
         color: "white",
         background: "black",
         minHeight: "100vh",
+        maxWidth: "520px",
+        margin: "0 auto",
+        boxSizing: "border-box",
       }}
     >
       {/* ===== Sticky Header (Title + Links) ===== */}
@@ -328,20 +331,22 @@ export default function RahabMintSite() {
           top: 0,
           zIndex: 1000,
           background: "black",
-          padding: "1rem 0.5rem",
+          padding: "1.25rem 0.5rem 1rem",
           borderBottom: "1px solid #222",
           minHeight: "130px",
           boxSizing: "border-box",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: "0.75rem",
         }}
       >
         <div
           style={{
-            position: "absolute",
-            top: "1rem",
-            right: "1rem",
             display: "flex",
+            flexDirection: "column",
             alignItems: "center",
-            gap: "0.5rem",
+            gap: "0.35rem",
           }}
         >
           {account && (
@@ -359,12 +364,13 @@ export default function RahabMintSite() {
             onClick={handleWalletButtonClick}
             disabled={walletButtonDisabled}
             style={{
-              padding: "0.35rem 0.85rem",
+              padding: "0.4rem 1.25rem",
               borderRadius: "999px",
               border: "1px solid #8ecbff",
               background: walletButtonDisabled ? "#222" : "transparent",
               color: "#8ecbff",
               cursor: walletButtonDisabled ? "not-allowed" : "pointer",
+              fontSize: "0.95rem",
             }}
           >
             {walletButtonText}
@@ -378,7 +384,7 @@ export default function RahabMintSite() {
             justifyContent: "center",
             gap: "1rem",
             flexWrap: "wrap",
-            marginBottom: "0.75rem",
+            marginBottom: "0.25rem",
           }}
         >
           <a
@@ -423,6 +429,7 @@ export default function RahabMintSite() {
           alignItems: "center",
           gap: "3rem",
           paddingTop: "1rem",
+          width: "100%",
         }}
       >
         {categories.map((cat) => (
