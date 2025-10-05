@@ -261,6 +261,10 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   const [contractStatus, setContractStatus] = useState<
     "unknown" | "checking" | "ready" | "missing"
   >("unknown");
+  const [autoApproveState, setAutoApproveState] = useState<
+    "idle" | "pending" | "succeeded" | "failed"
+  >("idle");
+  const [lastAutoApproveKey, setLastAutoApproveKey] = useState<string>("");
 
   const normalizedNftAddress = useMemo(() => {
     if (!nftContractAddr || typeof nftContractAddr !== "string") {
@@ -343,6 +347,26 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   const [tokenStatus, setTokenStatus] = useState<
     "unknown" | "resolving" | "resolved" | "missing"
   >("unknown");
+  const autoApproveKey = useMemo(() => {
+    const trimmedPrice = (activePrice || "").trim();
+    if (
+      !account ||
+      !tokenAddr ||
+      !normalizedNftAddress ||
+      !trimmedPrice ||
+      mintStatus !== LISTED_STATUS
+    ) {
+      return "";
+    }
+    return `${account.toLowerCase()}-${tokenAddr}-${normalizedNftAddress}-${trimmedPrice}`;
+  }, [account, tokenAddr, normalizedNftAddress, activePrice, mintStatus]);
+
+  const isOwner = useMemo(() => {
+    if (!account || !currentOwnerAddress) return false;
+    return (
+      account.trim().toLowerCase() === currentOwnerAddress.trim().toLowerCase()
+    );
+  }, [account, currentOwnerAddress]);
 
   const validateCandidate = useCallback(
     async (candidate: string | undefined | null) => {
@@ -507,6 +531,112 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     checkSoldOut();
   }, [checkSoldOut]);
 
+  useEffect(() => {
+    if (!autoApproveKey) {
+      if (autoApproveState !== "idle") {
+        setAutoApproveState("idle");
+      }
+      if (lastAutoApproveKey !== "") {
+        setLastAutoApproveKey("");
+      }
+      return;
+    }
+
+    if (isOwner) {
+      if (autoApproveState !== "idle") {
+        setAutoApproveState("idle");
+      }
+      if (lastAutoApproveKey !== "") {
+        setLastAutoApproveKey("");
+      }
+      return;
+    }
+
+    if (
+      autoApproveState === "pending" ||
+      lastAutoApproveKey === autoApproveKey ||
+      !provider ||
+      !account ||
+      !tokenAddr ||
+      !normalizedNftAddress ||
+      tokenStatus !== "resolved" ||
+      contractStatus !== "ready" ||
+      mintStatus !== LISTED_STATUS
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const runAutoApprove = async () => {
+      setAutoApproveState("pending");
+      try {
+        const signer = await getSigner();
+        if (!signer) {
+          throw new Error("No signer");
+        }
+
+        const erc20 = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, signer);
+        let decimals = 18;
+        try {
+          const rawDecimals = await erc20.decimals();
+          const parsedDecimals = Number(rawDecimals);
+          if (Number.isFinite(parsedDecimals)) {
+            decimals = parsedDecimals;
+          }
+        } catch (decimalsErr) {
+          console.error(decimalsErr);
+        }
+
+        const trimmedPrice = (activePrice || "").trim();
+        if (!trimmedPrice) {
+          throw new Error("Listing price is missing");
+        }
+
+        const parsedPrice = ethers.parseUnits(trimmedPrice, decimals);
+        const ownerAddr = await signer.getAddress();
+
+        await ensureAllowance({
+          erc20,
+          user: ownerAddr,
+          spender: normalizedNftAddress,
+          price: parsedPrice,
+        });
+
+        if (!cancelled) {
+          setAutoApproveState("succeeded");
+          setLastAutoApproveKey(autoApproveKey);
+        }
+      } catch (err) {
+        console.error("Automatic approval failed", err);
+        if (!cancelled) {
+          setLastAutoApproveKey(autoApproveKey);
+          setAutoApproveState("failed");
+        }
+      }
+    };
+
+    runAutoApprove();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    autoApproveKey,
+    autoApproveState,
+    lastAutoApproveKey,
+    provider,
+    account,
+    tokenAddr,
+    normalizedNftAddress,
+    tokenStatus,
+    contractStatus,
+    mintStatus,
+    isOwner,
+    getSigner,
+    activePrice,
+  ]);
+
   /** 残高の読み取り（アカウント/トークン変更時） */
   useEffect(() => {
     (async () => {
@@ -542,13 +672,6 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   }, []);
 
   /** ---------- Mint ---------- */
-  const isOwner = useMemo(() => {
-    if (!account || !currentOwnerAddress) return false;
-    return (
-      account.trim().toLowerCase() === currentOwnerAddress.trim().toLowerCase()
-    );
-  }, [account, currentOwnerAddress]);
-
   const handleMint = useCallback(async () => {
     if (minting || isSoldOut || mintStatus !== LISTED_STATUS || isOwner) return;
     try {
@@ -923,6 +1046,21 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         <p style={{ fontSize: "0.8rem", color: "#ff8080" }}>
           Unable to determine the PGirls token contract. Please refresh after
           verifying the metadata.
+        </p>
+      )}
+      {autoApproveState === "pending" && (
+        <p style={{ fontSize: "0.8rem", color: "#8ecbff" }}>
+          Automatically approving PGirls token spending...
+        </p>
+      )}
+      {autoApproveState === "failed" && (
+        <p style={{ fontSize: "0.8rem", color: "#ff8080" }}>
+          Automatic approval failed. You may need to retry minting manually.
+        </p>
+      )}
+      {autoApproveState === "succeeded" && (
+        <p style={{ fontSize: "0.8rem", color: "#8ecbff" }}>
+          PGirls token allowance is ready for minting.
         </p>
       )}
       <p style={{ fontSize: "0.8rem", color: "#ccc", wordBreak: "break-all" }}>
