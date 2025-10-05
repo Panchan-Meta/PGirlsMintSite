@@ -119,6 +119,7 @@ const NFT_ABI_MIN = [
 const NFT_ABI_WRITE = [
   ...NFT_ABI_MIN,
   "function mint(uint256 price, string tokenURI) public",
+  "function buy(uint256 price, string tokenURI) external",
 ] as const;
 
 const ERC20_ABI_MIN = [
@@ -618,7 +619,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       const paddedTokenId = tokenId.toString().padStart(3, "0");
       const tokenURI = `/metadata/${langStr}/${paddedTokenId}.json`;
 
-      const tx = await nft.mint(parsedPrice, tokenURI);
+      const tx = await nft.buy(parsedPrice, tokenURI);
       const receipt = await tx.wait();
       setTxHash(receipt?.hash ?? tx.hash);
 

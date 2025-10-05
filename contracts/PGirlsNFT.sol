@@ -31,6 +31,14 @@ contract PGirlsNFT is ERC721URIStorage, ERC2981, Ownable {
     }
 
     function mint(uint256 price, string memory tokenURI) public {
+        _purchase(price, tokenURI);
+    }
+
+    function buy(uint256 price, string memory tokenURI) external {
+        _purchase(price, tokenURI);
+    }
+
+    function _purchase(uint256 price, string memory tokenURI) internal {
         pgirlsToken.safeTransferFrom(msg.sender, treasury, price);
 
         uint256 tokenId = nextTokenId;
