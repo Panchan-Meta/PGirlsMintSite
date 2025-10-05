@@ -1,6 +1,12 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ethers } from "ethers";
 import PaymentNFT from "./ui/PaymentNFT";
 
@@ -148,6 +154,7 @@ export default function RahabMintSite() {
   const [account, setAccount] = useState<string>("");
   const [hasProvider, setHasProvider] = useState<boolean>(false);
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
+  const ethereumRef = useRef<any>(null);
 
   useEffect(() => {
     const fetchMetadata = async () => {
@@ -175,60 +182,88 @@ export default function RahabMintSite() {
     if (typeof window === "undefined") {
       return;
     }
-    const { ethereum } = window as typeof window & { ethereum?: any };
-    if (!ethereum) {
-      setHasProvider(false);
-      setProvider(null);
-      setAccount("");
-      return;
-    }
-
-    setHasProvider(true);
-    const nextProvider = new ethers.BrowserProvider(ethereum);
-    setProvider(nextProvider);
 
     let mounted = true;
 
-    const syncAccounts = async () => {
-      try {
-        const accounts: string[] = await ethereum.request?.({
-          method: "eth_accounts",
-        });
-        if (!mounted) return;
-        if (accounts && accounts.length > 0) {
-          try {
-            setAccount(ethers.getAddress(accounts[0]));
-          } catch {
-            setAccount(accounts[0]);
-          }
-        } else {
-          setAccount("");
-        }
-      } catch (err) {
-        console.error("Failed to read initial accounts", err);
-      }
+    const setAccountSafely = (value: string) => {
+      if (!mounted) return;
+      setAccount(value);
     };
 
-    syncAccounts();
-
-    const handleAccountsChanged = (accounts: string[]) => {
+    const setNormalizedAccount = (accounts: string[] | undefined | null) => {
       if (!mounted) return;
       if (accounts && accounts.length > 0) {
         try {
-          setAccount(ethers.getAddress(accounts[0]));
+          setAccountSafely(ethers.getAddress(accounts[0]));
         } catch {
-          setAccount(accounts[0]);
+          setAccountSafely(accounts[0]);
         }
       } else {
-        setAccount("");
+        setAccountSafely("");
       }
     };
 
-    ethereum.on?.("accountsChanged", handleAccountsChanged);
+    const handleAccountsChanged = (accounts: string[]) => {
+      setNormalizedAccount(accounts);
+    };
+
+    const setupProvider = (ethereum?: any) => {
+      if (!mounted) return;
+
+      if (!ethereum) {
+        setHasProvider(false);
+        setProvider(null);
+        setAccountSafely("");
+        ethereumRef.current = null;
+        return;
+      }
+
+      ethereumRef.current = ethereum;
+      setHasProvider(true);
+      setProvider(new ethers.BrowserProvider(ethereum));
+
+      ethereum
+        .request?.({ method: "eth_accounts" })
+        .then((accounts: string[]) => {
+          setNormalizedAccount(accounts);
+        })
+        .catch((err: unknown) => {
+          console.error("Failed to read initial accounts", err);
+        });
+
+      ethereum.removeListener?.("accountsChanged", handleAccountsChanged);
+      ethereum.on?.("accountsChanged", handleAccountsChanged);
+    };
+
+    const { ethereum } = window as typeof window & { ethereum?: any };
+    setupProvider(ethereum);
+
+    const handleEthereumInitialized = (event?: Event) => {
+      const detail = (event as CustomEvent)?.detail;
+      if (detail) {
+        setupProvider(detail);
+      } else {
+        const nextEthereum = (window as typeof window & { ethereum?: any })
+          .ethereum;
+        setupProvider(nextEthereum);
+      }
+    };
+
+    window.addEventListener("ethereum#initialized", handleEthereumInitialized);
+
+    const fallbackId = window.setTimeout(() => {
+      handleEthereumInitialized();
+    }, 3000);
 
     return () => {
       mounted = false;
-      ethereum.removeListener?.("accountsChanged", handleAccountsChanged);
+      window.removeEventListener(
+        "ethereum#initialized",
+        handleEthereumInitialized
+      );
+      window.clearTimeout(fallbackId);
+      const currentEthereum = ethereumRef.current;
+      currentEthereum?.removeListener?.("accountsChanged", handleAccountsChanged);
     };
   }, []);
 
