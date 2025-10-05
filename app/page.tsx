@@ -27,6 +27,54 @@ const NATIVE_SYMBOL =
 const EXPLORER =
   process.env.NEXT_PUBLIC_PGIRLSCHAIN_EXPLORER ?? "";
 
+// --- auto chain helpers (silent) ---
+const EXPECTED_CHAIN_ID_NUM = Number(process.env.NEXT_PUBLIC_CHAIN_ID || 0);
+const EXPECTED_CHAIN_ID_HEX = EXPECTED_CHAIN_ID_NUM
+  ? "0x" + EXPECTED_CHAIN_ID_NUM.toString(16)
+  : CHAIN_ID_HEX;
+
+const CHAIN_PARAMS = {
+  chainId: EXPECTED_CHAIN_ID_HEX,
+  chainName: CHAIN_NAME || "PGirlsChain",
+  nativeCurrency: {
+    name: process.env.NEXT_PUBLIC_NATIVE_SYMBOL || NATIVE_SYMBOL || "PGC",
+    symbol: process.env.NEXT_PUBLIC_NATIVE_SYMBOL || NATIVE_SYMBOL || "PGC",
+    decimals: 18,
+  },
+  rpcUrls: [String(process.env.NEXT_PUBLIC_RPC_URL || RPC_URL || "")].filter(
+    Boolean
+  ),
+  blockExplorerUrls: [
+    String(
+      process.env.NEXT_PUBLIC_EXPLORER_URL ||
+        process.env.NEXT_PUBLIC_PGIRLSCHAIN_EXPLORER ||
+        EXPLORER ||
+        ""
+    ),
+  ].filter(Boolean),
+};
+
+async function silentlyEnsureChain(eth: any) {
+  if (!eth || !EXPECTED_CHAIN_ID_HEX) return;
+  try {
+    await eth.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: EXPECTED_CHAIN_ID_HEX }],
+    });
+  } catch (e: any) {
+    if (e?.code === 4902) {
+      // 未登録なら追加→切替
+      await eth.request({
+        method: "wallet_addEthereumChain",
+        params: [CHAIN_PARAMS],
+      });
+    } else {
+      // それ以外は無視（ユーザーが拒否した等）
+      console.warn("switch chain failed:", e?.message || e);
+    }
+  }
+}
+
 // Ensure wallet is connected to the correct chain
 async function ensureCorrectNetwork(eth: any) {
   if (!eth) return false;
@@ -280,6 +328,7 @@ export default function RahabMintSite() {
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
   const [networkOk, setNetworkOk] = useState<boolean>(true);
   const ethereumRef = useRef<any>(null);
+  const ensureChainOnceRef = useRef(false);
 
   useEffect(() => {
     const fetchMetadata = async () => {
@@ -498,19 +547,32 @@ export default function RahabMintSite() {
         accounts = (await injected.enable()) ?? [];
       }
 
-      if (!accounts.length) {
+      if (accounts && accounts.length > 0) {
+        try {
+          setAccount(ethers.getAddress(accounts[0]));
+        } catch {
+          setAccount(accounts[0]);
+        }
+      } else {
         throw new Error("No accounts returned by provider");
       }
 
-      try {
-        setAccount(ethers.getAddress(accounts[0]));
-      } catch {
-        setAccount(accounts[0]);
-      }
-
       const nextProvider = createBrowserProvider(injected);
-      setProvider(nextProvider);
+      if (nextProvider) {
+        setProvider(nextProvider);
+      } else if (!provider) {
+        setProvider(null);
+      }
       ethereumRef.current = injected;
+
+      if (!ensureChainOnceRef.current) {
+        ensureChainOnceRef.current = true;
+        try {
+          await silentlyEnsureChain(injected);
+        } catch (e) {
+          console.warn("ensureChain after connect:", e);
+        }
+      }
     } catch (err) {
       console.error("Failed to connect wallet", err);
       alert(
@@ -523,6 +585,7 @@ export default function RahabMintSite() {
 
   const disconnectWallet = useCallback(() => {
     setAccount("");
+    ensureChainOnceRef.current = false;
   }, []);
 
   useEffect(() => {
@@ -540,6 +603,16 @@ export default function RahabMintSite() {
       }
     })();
   }, [provider, account]);
+
+  // provider が確定したら1回だけ quietly スイッチ
+  useEffect(() => {
+    const eth = ethereumRef.current;
+    if (!eth || ensureChainOnceRef.current) return;
+    ensureChainOnceRef.current = true;
+    silentlyEnsureChain(eth).catch(() => {});
+    // これ以上繰り返さない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provider]);
 
   const switchNetworkManually = useCallback(async () => {
     try {
@@ -769,6 +842,7 @@ export default function RahabMintSite() {
                     }
                     provider={provider}
                     account={account}
+                    chainOk={networkOk}
                   />
                 </div>
               );

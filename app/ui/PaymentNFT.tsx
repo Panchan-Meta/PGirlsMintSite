@@ -20,6 +20,44 @@ const getFallbackProvider = () => {
   return sharedFallbackProvider;
 };
 
+const WATCH_ASSET = {
+  address: String(process.env.NEXT_PUBLIC_PGIRLS_TOKEN_ADDRESS || ""),
+  symbol: String(process.env.NEXT_PUBLIC_PGIRLS_TOKEN_SYMBOL || "PGirls").slice(
+    0,
+    11
+  ),
+  decimals: Number(process.env.NEXT_PUBLIC_PGIRLS_TOKEN_DECIMALS || 18),
+  image: String(process.env.NEXT_PUBLIC_PGIRLS_TOKEN_ICON || ""),
+};
+
+async function silentlyWatchAsset(
+  eth: any,
+  tokenAddr?: string,
+  decimals?: number
+) {
+  const address = tokenAddr || WATCH_ASSET.address;
+  if (!eth || !address) return;
+  try {
+    await eth.request({
+      method: "wallet_watchAsset",
+      params: {
+        type: "ERC20",
+        options: {
+          address,
+          symbol: WATCH_ASSET.symbol,
+          decimals: Number.isFinite(decimals)
+            ? Number(decimals)
+            : WATCH_ASSET.decimals,
+          image: WATCH_ASSET.image || undefined,
+        },
+      },
+    });
+  } catch (e) {
+    // 拒否や未対応は無視
+    console.warn("watchAsset failed:", (e as any)?.message || e);
+  }
+}
+
 /* =========================================================
  * Props
  * =======================================================*/
@@ -45,6 +83,7 @@ export interface PaymentNFTProps {
   /** ウォレット */
   provider: ethers.BrowserProvider | null;
   account: string;
+  chainOk: boolean;
 }
 
 declare global {
@@ -208,6 +247,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     ownerAddress,
     provider,
     account,
+    chainOk,
   } = props;
 
   /* ---------- ベース状態 ---------- */
@@ -249,6 +289,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   const [tokenStatus, setTokenStatus] = useState<
     "unknown" | "resolving" | "resolved" | "missing"
   >("unknown");
+  const watchAssetAttemptedRef = useRef(false);
 
   /* ---------- 各種ユーティリティ ---------- */
   const normalizedNftAddress = useMemo(() => {
@@ -560,6 +601,27 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   useEffect(() => {
     if (!account) setBalance("");
   }, [account]);
+
+  useEffect(() => {
+    if (watchAssetAttemptedRef.current) return;
+    if (!chainOk) return;
+    if (tokenStatus !== "resolved") return;
+    const addr = tokenAddr || WATCH_ASSET.address;
+    if (!addr) return;
+    const eth =
+      (provider as any)?.provider ??
+      (typeof window !== "undefined" ? (window as any)?.ethereum : undefined);
+    if (!eth) return;
+    watchAssetAttemptedRef.current = true;
+    silentlyWatchAsset(eth, addr, decimalsGuess).catch(() => {});
+  }, [
+    chainOk,
+    tokenStatus,
+    tokenAddr,
+    provider,
+    decimalsGuess,
+    watchAssetAttemptedRef,
+  ]);
 
   const getOwnerFromMetadata = useCallback((metadata: any) => {
     if (!metadata || typeof metadata !== "object") return "";
@@ -939,19 +1001,22 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       {normalizedNftAddress && hasReadProvider && contractStatus === "checking" && (
         <p style={{ fontSize: "0.8rem", color: "#8ecbff" }}>Checking NFT contract...</p>
       )}
-      {normalizedNftAddress && hasReadProvider && contractStatus === "missing" && (
-        <p style={{ fontSize: "0.8rem", color: "#ff8080" }}>
-          Could not detect the specified NFT contract. Please check the network and
-          address.
-        </p>
-      )}
+      {chainOk &&
+        normalizedNftAddress &&
+        hasReadProvider &&
+        contractStatus === "missing" && (
+          <p style={{ fontSize: "0.8rem", color: "#ff8080" }}>
+            Could not detect the specified NFT contract. Please check the network and
+            address.
+          </p>
+        )}
 
       {tokenStatus === "resolving" && (
         <p style={{ fontSize: "0.8rem", color: "#8ecbff" }}>
           Resolving PGirls token contract...
         </p>
       )}
-      {tokenStatus === "missing" && (
+      {chainOk && tokenStatus === "missing" && (
         <p style={{ fontSize: "0.8rem", color: "#ff8080" }}>
           Unable to determine the PGirls token contract. Please refresh after verifying
           the metadata.
