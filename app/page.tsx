@@ -33,6 +33,8 @@ const EXPECTED_CHAIN_ID_HEX = EXPECTED_CHAIN_ID_NUM
   ? "0x" + EXPECTED_CHAIN_ID_NUM.toString(16)
   : CHAIN_ID_HEX;
 
+const TARGET_CHAIN_HEX = EXPECTED_CHAIN_ID_HEX.toLowerCase();
+
 const CHAIN_PARAMS = {
   chainId: EXPECTED_CHAIN_ID_HEX,
   chainName: CHAIN_NAME || "PGirlsChain",
@@ -79,12 +81,12 @@ async function silentlyEnsureChain(eth: any) {
 async function ensureCorrectNetwork(eth: any) {
   if (!eth) return false;
   const current: string = (await eth.request({ method: "eth_chainId" })) ?? "";
-  if (current?.toLowerCase() === CHAIN_ID_HEX.toLowerCase()) return true;
+  if (current?.toLowerCase() === TARGET_CHAIN_HEX) return true;
 
   try {
     await eth.request({
       method: "wallet_switchEthereumChain",
-      params: [{ chainId: CHAIN_ID_HEX }],
+      params: [{ chainId: EXPECTED_CHAIN_ID_HEX }],
     });
     return true;
   } catch (err: any) {
@@ -93,7 +95,7 @@ async function ensureCorrectNetwork(eth: any) {
         method: "wallet_addEthereumChain",
         params: [
           {
-            chainId: CHAIN_ID_HEX,
+            chainId: EXPECTED_CHAIN_ID_HEX,
             chainName: CHAIN_NAME,
             rpcUrls: [RPC_URL],
             nativeCurrency: {
@@ -107,7 +109,7 @@ async function ensureCorrectNetwork(eth: any) {
       });
       await eth.request({
         method: "wallet_switchEthereumChain",
-        params: [{ chainId: CHAIN_ID_HEX }],
+        params: [{ chainId: EXPECTED_CHAIN_ID_HEX }],
       });
       return true;
     }
@@ -597,7 +599,7 @@ export default function RahabMintSite() {
           return;
         }
         const id = (await eth.request({ method: "eth_chainId" }))?.toLowerCase();
-        setNetworkOk(id === CHAIN_ID_HEX.toLowerCase());
+        setNetworkOk(id === TARGET_CHAIN_HEX);
       } catch {
         setNetworkOk(false);
       }
