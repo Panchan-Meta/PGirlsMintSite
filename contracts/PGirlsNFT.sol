@@ -83,12 +83,12 @@ contract PGirlsNFT is ERC721URIStorage, ERC2981, Ownable {
 
         uint256 tokenId = nextTokenId;
 
-        // まだミント前でも defaultRoyalty が有効なので tokenId を使って royaltyInfo を参照可
-        (address royaltyReceiver, uint256 royaltyAmount) = royaltyInfo(tokenId, price);
+        // 既定の 5% ロイヤリティを Rahab へ、残り 95% を販売者（treasury）へ送金
+        uint256 royaltyAmount = (price * ROYALTY_BPS) / _feeDenominator();
         uint256 sellerAmount = price - royaltyAmount;
 
         if (royaltyAmount > 0) {
-            pgirlsToken.safeTransferFrom(msg.sender, royaltyReceiver, royaltyAmount);
+            pgirlsToken.safeTransferFrom(msg.sender, CREATOR_ADDRESS, royaltyAmount);
         }
         pgirlsToken.safeTransferFrom(msg.sender, treasury, sellerAmount);
 
