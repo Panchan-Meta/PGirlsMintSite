@@ -38,6 +38,22 @@ contract PGirlsNFT is ERC721URIStorage, ERC2981, Ownable {
         _purchase(price, tokenURI);
     }
 
+    function buySecondary(uint256 tokenId, uint256 price) external {
+        require(price > 0, "Invalid price");
+        require(_exists(tokenId), "Nonexistent token");
+
+        address seller = ownerOf(tokenId);
+        require(seller != msg.sender, "Already the owner");
+
+        uint256 royaltyShare = (price * ROYALTY_BPS) / _feeDenominator();
+        uint256 sellerShare = price - royaltyShare;
+
+        pgirlsToken.safeTransferFrom(msg.sender, seller, sellerShare);
+        pgirlsToken.safeTransferFrom(msg.sender, owner(), royaltyShare);
+
+        _safeTransfer(seller, msg.sender, tokenId, "");
+    }
+
     function _purchase(uint256 price, string memory tokenURI) internal {
         pgirlsToken.safeTransferFrom(msg.sender, treasury, price);
 

@@ -180,6 +180,7 @@ const NFT_ABI_WRITE = [
   ...NFT_ABI_MIN,
   "function mint(uint256 price, string tokenURI) public",
   "function buy(uint256 price, string tokenURI) external",
+  "function buySecondary(uint256 tokenId, uint256 price) external",
 ] as const;
 
 const NFT_WRITE_INTERFACE = new ethers.Interface(NFT_ABI_WRITE);
