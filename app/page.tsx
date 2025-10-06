@@ -66,10 +66,14 @@ async function silentlyEnsureChain(eth: any) {
   } catch (e: any) {
     if (e?.code === 4902) {
       // 未登録なら追加→切替
-      await eth.request({
-        method: "wallet_addEthereumChain",
-        params: [CHAIN_PARAMS],
-      });
+      try {
+        await eth.request({
+          method: "wallet_addEthereumChain",
+          params: [CHAIN_PARAMS],
+        });
+      } catch (addErr) {
+        console.warn("wallet_addEthereumChain failed:", addErr);
+      }
     } else {
       // それ以外は無視（ユーザーが拒否した等）
       console.warn("switch chain failed:", e?.message || e);
@@ -78,10 +82,11 @@ async function silentlyEnsureChain(eth: any) {
 }
 
 // Ensure wallet is connected to the correct chain
-async function ensureCorrectNetwork(eth: any) {
+async function ensureCorrectNetwork(eth: any): Promise<boolean> {
   if (!eth) return false;
-  const current: string = (await eth.request({ method: "eth_chainId" })) ?? "";
-  if (current?.toLowerCase() === TARGET_CHAIN_HEX) return true;
+  const current =
+    (await eth.request({ method: "eth_chainId" }).catch(() => null)) ?? "";
+  if (current && current.toLowerCase() === TARGET_CHAIN_HEX) return true;
 
   try {
     await eth.request({
@@ -91,29 +96,21 @@ async function ensureCorrectNetwork(eth: any) {
     return true;
   } catch (err: any) {
     if (err?.code === 4902 && RPC_URL) {
-      await eth.request({
-        method: "wallet_addEthereumChain",
-        params: [
-          {
-            chainId: EXPECTED_CHAIN_ID_HEX,
-            chainName: CHAIN_NAME,
-            rpcUrls: [RPC_URL],
-            nativeCurrency: {
-              name: CHAIN_NAME,
-              symbol: NATIVE_SYMBOL,
-              decimals: 18,
-            },
-            blockExplorerUrls: EXPLORER ? [EXPLORER] : [],
-          },
-        ],
-      });
-      await eth.request({
-        method: "wallet_switchEthereumChain",
-        params: [{ chainId: EXPECTED_CHAIN_ID_HEX }],
-      });
-      return true;
+      try {
+        await eth.request({
+          method: "wallet_addEthereumChain",
+          params: [CHAIN_PARAMS],
+        });
+        await eth.request({
+          method: "wallet_switchEthereumChain",
+          params: [{ chainId: EXPECTED_CHAIN_ID_HEX }],
+        });
+        return true;
+      } catch {
+        // ignore - best effort
+      }
     }
-    throw err;
+    return false;
   }
 }
 
@@ -330,7 +327,6 @@ export default function RahabMintSite() {
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
   const [networkOk, setNetworkOk] = useState<boolean>(true);
   const ethereumRef = useRef<any>(null);
-  const ensureChainOnceRef = useRef(false);
 
   useEffect(() => {
     const fetchMetadata = async () => {
@@ -383,16 +379,16 @@ export default function RahabMintSite() {
       setNormalizedAccount(accounts);
     };
 
-    const handleChainChanged = async (_chainId: string) => {
+    const handleChainChanged = async () => {
       try {
-        if (!ethereumRef.current) return;
-        const ok = await ensureCorrectNetwork(ethereumRef.current);
-        const nextProvider = createBrowserProvider(ethereumRef.current);
-        setProvider(ok ? nextProvider : null);
-        setNetworkOk(Boolean(ok));
+        const eth = ethereumRef.current;
+        if (!eth) return;
+        const ok = await ensureCorrectNetwork(eth);
+        setProvider(createBrowserProvider(eth));
+        setNetworkOk(ok);
       } catch {
-        setProvider(null);
         setNetworkOk(false);
+        setProvider(null);
       }
     };
 
@@ -517,77 +513,51 @@ export default function RahabMintSite() {
   }, []);
 
   const connectWallet = useCallback(async () => {
-    if (typeof window === "undefined") {
-      alert("MetaMask not found");
-      return;
-    }
-    try {
-      setIsConnecting(true);
-      const injected = selectEthereumProvider(
-        ethereumRef.current ?? (window as typeof window & { ethereum?: any })
-          .ethereum
-      );
+    if (typeof window === "undefined") return;
 
+    setIsConnecting(true);
+    try {
+      const injected = selectEthereumProvider(
+        ethereumRef.current ?? (window as any).ethereum
+      );
       if (!injected) {
         alert("MetaMask not found");
         return;
       }
       setHasProvider(true);
 
-      await ensureCorrectNetwork(injected);
-      setNetworkOk(true);
-
       let accounts: string[] = [];
-
       if (typeof injected.request === "function") {
         accounts =
-          (await injected.request({
-            method: "eth_requestAccounts",
-            params: [],
-          })) ?? [];
+          (await injected.request({ method: "eth_requestAccounts" })) ?? [];
       } else if (typeof injected.enable === "function") {
         accounts = (await injected.enable()) ?? [];
       }
+      if (accounts.length === 0) throw new Error("No accounts returned");
 
-      if (accounts && accounts.length > 0) {
-        try {
-          setAccount(ethers.getAddress(accounts[0]));
-        } catch {
-          setAccount(accounts[0]);
-        }
-      } else {
-        throw new Error("No accounts returned by provider");
+      try {
+        setAccount(ethers.getAddress(accounts[0]));
+      } catch {
+        setAccount(accounts[0]);
       }
 
       const nextProvider = createBrowserProvider(injected);
-      if (nextProvider) {
-        setProvider(nextProvider);
-      } else if (!provider) {
-        setProvider(null);
-      }
+      setProvider(nextProvider);
       ethereumRef.current = injected;
 
-      if (!ensureChainOnceRef.current) {
-        ensureChainOnceRef.current = true;
-        try {
-          await silentlyEnsureChain(injected);
-        } catch (e) {
-          console.warn("ensureChain after connect:", e);
-        }
-      }
+      await silentlyEnsureChain(injected);
+      const ok = await ensureCorrectNetwork(injected);
+      setNetworkOk(ok);
     } catch (err) {
-      console.error("Failed to connect wallet", err);
-      alert(
-        "Wallet connection failed. Please approve the network switch in your wallet and try again."
-      );
+      console.warn("connectWallet: ", err);
+      setNetworkOk(false);
     } finally {
       setIsConnecting(false);
     }
-  }, [provider]);
+  }, []);
 
   const disconnectWallet = useCallback(() => {
     setAccount("");
-    ensureChainOnceRef.current = false;
   }, []);
 
   useEffect(() => {
@@ -606,13 +576,11 @@ export default function RahabMintSite() {
     })();
   }, [provider, account]);
 
-  // provider が確定したら1回だけ quietly スイッチ
+  // provider が確定したら quietly スイッチ（ベストエフォート）
   useEffect(() => {
     const eth = ethereumRef.current;
-    if (!eth || ensureChainOnceRef.current) return;
-    ensureChainOnceRef.current = true;
+    if (!eth) return;
     silentlyEnsureChain(eth).catch(() => {});
-    // これ以上繰り返さない
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider]);
 
@@ -620,13 +588,12 @@ export default function RahabMintSite() {
     try {
       const eth = ethereumRef.current;
       if (!eth) return;
-      await ensureCorrectNetwork(eth);
-      const next = createBrowserProvider(eth);
-      setProvider(next);
-      setNetworkOk(true);
+      const ok = await ensureCorrectNetwork(eth);
+      setProvider(createBrowserProvider(eth));
+      setNetworkOk(ok);
     } catch (e) {
       console.error(e);
-      alert("Failed to switch network in wallet.");
+      setNetworkOk(false);
     }
   }, []);
 
