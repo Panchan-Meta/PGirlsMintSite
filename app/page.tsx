@@ -135,6 +135,8 @@ const ADDRESS_KEYS = {
   ],
 } as const;
 
+const TOKEN_ID_KEYS = ["tokenId", "tokenID", "token_id", "id"] as const;
+
 const isRecord = (value: unknown): value is MetadataRecord =>
   typeof value === "object" && value !== null;
 
@@ -167,6 +169,61 @@ const pickAddressFromMetadata = (
   }
 
   return fallback ?? "";
+};
+
+const parseTokenIdValue = (
+  value: unknown
+): { numeric: bigint; display: string } | null => {
+  if (typeof value === "bigint") {
+    return { numeric: value, display: value.toString() };
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const truncated = Math.trunc(value);
+    return { numeric: BigInt(truncated), display: String(truncated) };
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    const normalized = trimmed.replace(/[,\s]/g, "").replace(/^#/, "");
+    const candidate =
+      normalized.startsWith("0x") || normalized.startsWith("0X")
+        ? normalized
+        : /^[0-9]+$/.test(normalized)
+        ? normalized
+        : "";
+
+    if (!candidate) return null;
+
+    try {
+      return { numeric: BigInt(candidate), display: trimmed };
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+};
+
+const pickTokenIdFromMetadata = (
+  metadata: unknown
+): { numeric: bigint | null; display: string | null } => {
+  const metaRecord = isRecord(metadata) ? (metadata as MetadataRecord) : {};
+  const props = getMetadataProps(metadata);
+
+  for (const key of TOKEN_ID_KEYS) {
+    const parsed = parseTokenIdValue(props[key]);
+    if (parsed) return parsed;
+  }
+
+  for (const key of TOKEN_ID_KEYS) {
+    const parsed = parseTokenIdValue(metaRecord[key]);
+    if (parsed) return parsed;
+  }
+
+  return { numeric: null, display: null };
 };
 
 type Item = { fileName: string; metadata: any };
@@ -787,13 +844,18 @@ export default function RahabMintSite() {
                 ADDRESS_KEYS.erc20,
                 DEFAULT_ERC20_CONTRACT
               );
+              const { numeric: metadataTokenId, display: tokenIdLabel } =
+                pickTokenIdFromMetadata(metadata);
+              const fallbackTokenId = BigInt((starts[cat] ?? 1) + i);
+              const effectiveTokenId = metadataTokenId ?? fallbackTokenId;
 
               return (
                 <div key={`${cat}-${fileName}`} style={{ marginBottom: "2rem" }}>
                   <PaymentNFT
                     nftContractAddr={nftContractAddr}
                     erc20Address={erc20Address || undefined}
-                    tokenId={BigInt((starts[cat] ?? 1) + i)}
+                    tokenId={effectiveTokenId}
+                    tokenIdLabel={tokenIdLabel || undefined}
                     mediaUrl={(metadata as any).image || (metadata as any).animation_url}
                     price={((metadata as any).price ?? "")
                       .toString()
