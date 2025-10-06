@@ -3,14 +3,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ethers } from "ethers";
 
+/* ============================== RPC / watchAsset ============================== */
+
 const RPC_URL = (process.env.NEXT_PUBLIC_RPC_URL || "").trim();
 let sharedFallbackProvider: ethers.JsonRpcProvider | null | undefined;
 
 const getFallbackProvider = () => {
   if (!RPC_URL) return null;
-  if (sharedFallbackProvider !== undefined) {
-    return sharedFallbackProvider;
-  }
+  if (sharedFallbackProvider !== undefined) return sharedFallbackProvider;
   try {
     sharedFallbackProvider = new ethers.JsonRpcProvider(RPC_URL);
   } catch (err) {
@@ -22,19 +22,12 @@ const getFallbackProvider = () => {
 
 const WATCH_ASSET = {
   address: String(process.env.NEXT_PUBLIC_PGIRLS_TOKEN_ADDRESS || ""),
-  symbol: String(process.env.NEXT_PUBLIC_PGIRLS_TOKEN_SYMBOL || "PGirls").slice(
-    0,
-    11
-  ),
+  symbol: String(process.env.NEXT_PUBLIC_PGIRLS_TOKEN_SYMBOL || "PGirls").slice(0, 11),
   decimals: Number(process.env.NEXT_PUBLIC_PGIRLS_TOKEN_DECIMALS || 18),
   image: String(process.env.NEXT_PUBLIC_PGIRLS_TOKEN_ICON || ""),
 };
 
-async function silentlyWatchAsset(
-  eth: any,
-  tokenAddr?: string,
-  decimals?: number
-) {
+async function silentlyWatchAsset(eth: any, tokenAddr?: string, decimals?: number) {
   const address = tokenAddr || WATCH_ASSET.address;
   if (!eth || !address) return;
   try {
@@ -45,22 +38,18 @@ async function silentlyWatchAsset(
         options: {
           address,
           symbol: WATCH_ASSET.symbol,
-          decimals: Number.isFinite(decimals)
-            ? Number(decimals)
-            : WATCH_ASSET.decimals,
+          decimals: Number.isFinite(decimals) ? Number(decimals) : WATCH_ASSET.decimals,
           image: WATCH_ASSET.image || undefined,
         },
       },
     });
   } catch (e) {
-    // 拒否や未対応は無視
     console.warn("watchAsset failed:", (e as any)?.message || e);
   }
 }
 
-/* =========================================================
- * Props
- * =======================================================*/
+/* ============================== Props ============================== */
+
 export interface PaymentNFTProps {
   nftContractAddr: string;
   tokenId: bigint;
@@ -92,20 +81,15 @@ declare global {
   }
 }
 
-/* =========================================================
- * 画像/動画 自動解決
- * =======================================================*/
-const guessMediaCandidates = (
-  providedUrl: string | undefined,
-  category: string,
-  fileName: string
-) => {
-  const baseName = fileName.replace(/\.[^.]+$/, ""); // drop ".json"
+/* ============================== 画像/動画 自動解決 ============================== */
+
+const guessMediaCandidates = (providedUrl: string | undefined, category: string, fileName: string) => {
+  const baseName = fileName.replace(/\.[^.]+$/, "");
   const safeCat = encodeURIComponent(category);
   const safeBase = `/assets/${safeCat}/${encodeURIComponent(baseName)}`;
 
   const candidates = [
-    providedUrl, // メタデータの image/animation_url が最優先
+    providedUrl,
     `${safeBase}.png`,
     `${safeBase}.jpg`,
     `${safeBase}.jpeg`,
@@ -129,10 +113,11 @@ function AutoMedia({
   width?: number;
 }) {
   const [idx, setIdx] = React.useState(0);
-  const candidates = React.useMemo(
-    () => guessMediaCandidates(providedUrl, category, fileName),
-    [providedUrl, category, fileName]
-  );
+  const candidates = React.useMemo(() => guessMediaCandidates(providedUrl, category, fileName), [
+    providedUrl,
+    category,
+    fileName,
+  ]);
 
   const url = candidates[idx];
   const onError = () => setIdx((i) => Math.min(i + 1, candidates.length - 1));
@@ -141,14 +126,7 @@ function AutoMedia({
 
   if (url.toLowerCase().endsWith(".mp4")) {
     return (
-      <video
-        src={url}
-        controls
-        loop
-        playsInline
-        onError={onError}
-        style={{ borderRadius: 12, width: "100%", maxWidth: width }}
-      />
+      <video src={url} controls loop playsInline onError={onError} style={{ borderRadius: 12, width: "100%", maxWidth: width }} />
     );
   }
 
@@ -164,9 +142,8 @@ function AutoMedia({
   );
 }
 
-/* =========================================================
- * ABIs / 定数
- * =======================================================*/
+/* ============================== ABIs / 定数 ============================== */
+
 const DEFAULT_MINT_STATUS = "BeforeList";
 const LISTED_STATUS = "Listed";
 
@@ -203,38 +180,22 @@ const INSUFFICIENT_BALANCE_PATTERNS = [
 function extractErrorMessage(error: any): string | undefined {
   if (!error) return undefined;
   if (typeof error === "string") return error;
-
-  const cands = [
-    error?.reason,
-    error?.shortMessage,
-    error?.data?.message,
-    error?.error?.message,
-    error?.error?.data?.message,
-    error?.message,
-  ];
-  for (const c of cands) {
-    if (typeof c === "string" && c.trim()) return c;
-  }
+  const cands = [error?.reason, error?.shortMessage, error?.data?.message, error?.error?.message, error?.error?.data?.message, error?.message];
+  for (const c of cands) if (typeof c === "string" && c.trim()) return c;
   return undefined;
 }
-
 function getFriendlyErrorMessage(error: any): string {
   const raw = extractErrorMessage(error);
   if (!raw) return "Transaction failed";
-
   const lower = raw.toLowerCase();
-  if (
-    INSUFFICIENT_BALANCE_PATTERNS.some((pat) => lower.includes(pat)) ||
-    error?.code === "INSUFFICIENT_FUNDS"
-  ) {
+  if (INSUFFICIENT_BALANCE_PATTERNS.some((pat) => lower.includes(pat)) || error?.code === "INSUFFICIENT_FUNDS") {
     return "Insufficient PGirls token balance (insufficient funds).";
   }
   return raw;
 }
 
-/* =========================================================
- * 本体
- * =======================================================*/
+/* ============================== 本体 ============================== */
+
 export default function PaymentNFT(props: PaymentNFTProps) {
   const {
     nftContractAddr,
@@ -253,9 +214,12 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     chainOk,
   } = props;
 
-  /* ---------- ベース状態 ---------- */
+  /* ---------- 状態 ---------- */
   const [minting, setMinting] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
+
+  // 「売り切れ」と「ミント済み」を分離
+  const [alreadyMinted, setAlreadyMinted] = useState<boolean>(false);
   const [isSoldOut, setIsSoldOut] = useState<boolean>(!!initialSoldout);
 
   const fallbackTokenAddress = useMemo(() => {
@@ -269,12 +233,8 @@ export default function PaymentNFT(props: PaymentNFTProps) {
 
   const [resolvedTokenAddress, setResolvedTokenAddress] = useState<string>("");
   const [balance, setBalance] = useState<string>("");
-  const [currentOwnerAddress, setCurrentOwnerAddress] = useState<string>(
-    ownerAddress?.trim() ?? ""
-  );
-  const [mintStatus, setMintStatus] = useState<string>(
-    initialMintStatus || DEFAULT_MINT_STATUS
-  );
+  const [currentOwnerAddress, setCurrentOwnerAddress] = useState<string>(ownerAddress?.trim() ?? "");
+  const [mintStatus, setMintStatus] = useState<string>(initialMintStatus || DEFAULT_MINT_STATUS);
   const [activePrice, setActivePrice] = useState<string>(price);
   const [listPriceInput, setListPriceInput] = useState<string>(price);
   const [updatingListing, setUpdatingListing] = useState<boolean>(false);
@@ -282,20 +242,18 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   type ReadyState = "unknown" | "checking" | "ready" | "missing";
   const [contractStatus, setContractStatus] = useState<ReadyState>("unknown");
 
-  /* ---------- Allowance / Approve 制御 ---------- */
+  /* ---------- Allowance / Approve ---------- */
   const [decimalsGuess, setDecimalsGuess] = useState<number>(18);
   const [allowanceOK, setAllowanceOK] = useState<boolean>(false);
   const [approving, setApproving] = useState<boolean>(false);
 
   /* ---------- Token 解決 ---------- */
   const [tokenAddr, setTokenAddr] = useState<string>("");
-  const [tokenStatus, setTokenStatus] = useState<
-    "unknown" | "resolving" | "resolved" | "missing"
-  >("unknown");
+  const [tokenStatus, setTokenStatus] = useState<"unknown" | "resolving" | "resolved" | "missing">("unknown");
   const [nftTokenAddr, setNftTokenAddr] = useState<string>("");
   const watchAssetAttemptedRef = useRef(false);
 
-  /* ---------- 各種ユーティリティ ---------- */
+  /* ---------- Provider 準備 ---------- */
   const normalizedNftAddress = useMemo(() => {
     if (!nftContractAddr || typeof nftContractAddr !== "string") return "";
     try {
@@ -307,28 +265,23 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   }, [nftContractAddr]);
 
   const fallbackProvider = useMemo(() => getFallbackProvider(), []);
-
   const readProviders = useMemo(() => {
     const list = new Set<ethers.Provider>();
     if (provider) list.add(provider);
     if (fallbackProvider) list.add(fallbackProvider);
     return Array.from(list);
   }, [provider, fallbackProvider]);
-
   const primaryReadProvider = readProviders[0] ?? null;
   const hasReadProvider = readProviders.length > 0;
 
+  /* ---------- コントラクト / token 解決 ---------- */
   useEffect(() => {
     let cancelled = false;
     setNftTokenAddr("");
     (async () => {
       try {
         if (!primaryReadProvider || !normalizedNftAddress) return;
-        const nftRO = new ethers.Contract(
-          normalizedNftAddress,
-          NFT_ABI_MIN,
-          primaryReadProvider
-        );
+        const nftRO = new ethers.Contract(normalizedNftAddress, NFT_ABI_MIN, primaryReadProvider);
         const a = await nftRO.pgirlsToken().catch(() => "");
         if (!a || cancelled) return;
         setNftTokenAddr(ethers.getAddress(a));
@@ -354,15 +307,11 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     setListPriceInput(price);
   }, [price]);
 
-  const explorerBase =
-    process.env.NEXT_PUBLIC_PGIRLSCHAIN_EXPLORER ||
-    "https://explorer.rahabpunkaholicgirls.com";
+  const explorerBase = process.env.NEXT_PUBLIC_PGIRLSCHAIN_EXPLORER || "https://explorer.rahabpunkaholicgirls.com";
 
   const isOwner = useMemo(() => {
     if (!account || !currentOwnerAddress) return false;
-    return (
-      account.trim().toLowerCase() === currentOwnerAddress.trim().toLowerCase()
-    );
+    return account.trim().toLowerCase() === currentOwnerAddress.trim().toLowerCase();
   }, [account, currentOwnerAddress]);
 
   /* ---------- コントラクト存在チェック ---------- */
@@ -374,12 +323,10 @@ export default function PaymentNFT(props: PaymentNFTProps) {
           if (!cancelled) setContractStatus("missing");
           return;
         }
-
         if (!hasReadProvider) {
           if (!cancelled) setContractStatus("unknown");
           return;
         }
-
         if (!cancelled) setContractStatus("checking");
 
         for (const runner of readProviders) {
@@ -394,7 +341,6 @@ export default function PaymentNFT(props: PaymentNFTProps) {
             console.error("Failed to fetch contract code", err);
           }
         }
-
         if (!cancelled) setContractStatus("missing");
       } catch (err) {
         console.error(err);
@@ -433,9 +379,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
           }
         }
         console.warn("Token candidate has no code", normalized);
-      } catch {
-        /* ignore */
-      }
+      } catch {}
       return "";
     },
     [readProviders]
@@ -454,31 +398,23 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         return;
       }
 
-      // 2) フォールバック（メタデータ由来）
+      // 2) フォールバック
       const fallback = await validateCandidate(fallbackTokenAddress);
       if (!cancelled && fallback) {
-        if (fallback !== resolvedTokenAddress) {
-          setResolvedTokenAddress(fallback);
-        }
+        if (fallback !== resolvedTokenAddress) setResolvedTokenAddress(fallback);
         setTokenAddr(fallback);
         setTokenStatus("resolved");
         return;
       }
 
-      // 3) コントラクトに pgirlsToken があればそれを読む
+      // 3) コントラクトの pgirlsToken
       if (primaryReadProvider && normalizedNftAddress) {
         try {
-          const nftRO = new ethers.Contract(
-            normalizedNftAddress,
-            NFT_ABI_MIN,
-            primaryReadProvider
-          );
+          const nftRO = new ethers.Contract(normalizedNftAddress, NFT_ABI_MIN, primaryReadProvider);
           const onChainRaw = await nftRO.pgirlsToken().catch(() => "");
           const onChain = await validateCandidate(onChainRaw);
           if (!cancelled && onChain) {
-            if (onChain !== resolvedTokenAddress) {
-              setResolvedTokenAddress(onChain);
-            }
+            if (onChain !== resolvedTokenAddress) setResolvedTokenAddress(onChain);
             setTokenAddr(onChain);
             setTokenStatus("resolved");
             return;
@@ -487,7 +423,6 @@ export default function PaymentNFT(props: PaymentNFTProps) {
           console.error("resolve token via nft failed", err);
         }
       }
-
       if (!cancelled) {
         setTokenAddr("");
         setTokenStatus("missing");
@@ -496,85 +431,53 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     return () => {
       cancelled = true;
     };
-  }, [
-    validateCandidate,
-    resolvedTokenAddress,
-    fallbackTokenAddress,
-    primaryReadProvider,
-    normalizedNftAddress,
-  ]);
+  }, [validateCandidate, resolvedTokenAddress, fallbackTokenAddress, primaryReadProvider, normalizedNftAddress]);
 
-  /* ---------- 売切れ判定（オンチェーン + フォールバック） ---------- */
-  const checkSoldOut = useCallback(async () => {
+  /* ---------- 売切れ/ミント済み 判定（分離） ---------- */
+  const checkOnchainMintState = useCallback(async () => {
     try {
-      if (mintStatus !== LISTED_STATUS) {
-        setIsSoldOut(Boolean(initialSoldout));
-        return;
-      }
-      const priceValue = (activePrice || "").trim();
-      if (priceValue) {
-        setIsSoldOut(false);
-        return;
-      }
-      if (
-        !primaryReadProvider ||
-        !normalizedNftAddress ||
-        !tokenId ||
-        contractStatus !== "ready"
-      )
-        return;
+      if (!primaryReadProvider || !normalizedNftAddress || !tokenId || contractStatus !== "ready") return;
 
-      const nftRO = new ethers.Contract(
-        normalizedNftAddress,
-        NFT_ABI_MIN,
-        primaryReadProvider
-      );
-      let sold = false;
+      const nftRO = new ethers.Contract(normalizedNftAddress, NFT_ABI_MIN, primaryReadProvider);
+
+      // 既にミント済みか？
+      let minted = false;
       try {
         const next: bigint = await nftRO.nextTokenId();
-        if (tokenId < next) sold = true;
-      } catch (e) {}
-      if (!sold) {
+        if (tokenId < next) minted = true;
+      } catch {}
+      if (!minted) {
         try {
           await nftRO.ownerOf(tokenId);
-          sold = true;
-        } catch (e) {}
+          minted = true;
+        } catch {}
       }
-      setIsSoldOut(sold);
+      setAlreadyMinted(minted);
+
+      // 「売切れ」= ミント済み かつ リストされていない時のみ
+      const listed = mintStatus === LISTED_STATUS && Boolean((activePrice || "").trim());
+      setIsSoldOut(minted && !listed);
     } catch (e) {
       console.error(e);
     }
-  }, [
-    primaryReadProvider,
-    normalizedNftAddress,
-    tokenId,
-    mintStatus,
-    contractStatus,
-    initialSoldout,
-    activePrice,
-  ]);
+  }, [primaryReadProvider, normalizedNftAddress, tokenId, contractStatus, mintStatus, activePrice]);
 
   useEffect(() => {
-    checkSoldOut();
-  }, [checkSoldOut]);
+    // 初期フォールバック
+    if (mintStatus !== LISTED_STATUS) {
+      setIsSoldOut(Boolean(initialSoldout));
+    }
+    checkOnchainMintState();
+  }, [checkOnchainMintState, mintStatus, initialSoldout]);
 
-  /* ---------- 残高/Allowance の読み取り ---------- */
+  /* ---------- 残高/Allowance ---------- */
   const refreshAllowance = useCallback(async () => {
     try {
-      if (
-        !primaryReadProvider ||
-        !account ||
-        !tokenAddr ||
-        !normalizedNftAddress
-      ) {
+      if (!primaryReadProvider || !account || !tokenAddr || !normalizedNftAddress) {
         setAllowanceOK(false);
         return;
       }
-      const erc20r = new ethers.Contract(
-        tokenAddr,
-        ERC20_ABI_MIN,
-        primaryReadProvider
-      );
+      const erc20r = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, primaryReadProvider);
       let d = 18;
       try {
         d = Number(await erc20r.decimals());
@@ -607,11 +510,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
           setBalance("");
           return;
         }
-        const erc20r = new ethers.Contract(
-          tokenAddr,
-          ERC20_ABI_MIN,
-          primaryReadProvider
-        );
+        const erc20r = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, primaryReadProvider);
         let d = 18;
         try {
           d = Number(await erc20r.decimals());
@@ -635,33 +534,21 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     if (tokenStatus !== "resolved") return;
     const addr = tokenAddr || WATCH_ASSET.address;
     if (!addr) return;
-    const eth =
-      (provider as any)?.provider ??
-      (typeof window !== "undefined" ? (window as any)?.ethereum : undefined);
+    const eth = (provider as any)?.provider ?? (typeof window !== "undefined" ? (window as any)?.ethereum : undefined);
     if (!eth) return;
     watchAssetAttemptedRef.current = true;
     silentlyWatchAsset(eth, addr, decimalsGuess).catch(() => {});
-  }, [
-    chainOk,
-    tokenStatus,
-    tokenAddr,
-    provider,
-    decimalsGuess,
-    watchAssetAttemptedRef,
-  ]);
+  }, [chainOk, tokenStatus, tokenAddr, provider, decimalsGuess, watchAssetAttemptedRef]);
 
   const getOwnerFromMetadata = useCallback((metadata: any) => {
     if (!metadata || typeof metadata !== "object") return "";
-    const cand =
-      metadata.ownerAddress || metadata.owner || metadata.walletAddress || "";
+    const cand = metadata.ownerAddress || metadata.owner || metadata.walletAddress || "";
     return typeof cand === "string" ? cand.trim() : "";
   }, []);
 
-  /* ---------- Approve / Mint （二重起動禁止） ---------- */
+  /* ---------- Approve ---------- */
   const txMutexRef = useRef<Promise<any> | null>(null);
-  const isAlreadyPending = (e: any) =>
-    e?.code === -32002 ||
-    (typeof e?.message === "string" && /request.*pending/i.test(e.message));
+  const isAlreadyPending = (e: any) => e?.code === -32002 || (typeof e?.message === "string" && /request.*pending/i.test(e.message));
 
   const handleApprove = useCallback(async () => {
     if (approving || allowanceOK) return;
@@ -686,7 +573,6 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       const current: bigint = await erc20.allowance(owner, normalizedNftAddress);
 
       const run = async () => {
-        // 非0→非0 を避ける（USDT対策）
         if (current > 0n && current < need) {
           const tx0 = await erc20.approve(normalizedNftAddress, 0n);
           await tx0.wait();
@@ -709,19 +595,19 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       txMutexRef.current = null;
       setApproving(false);
     }
-  }, [
-    approving,
-    allowanceOK,
-    requireSigner,
-    tokenAddr,
-    decimalsGuess,
-    activePrice,
-    normalizedNftAddress,
-    refreshAllowance,
-  ]);
+  }, [approving, allowanceOK, requireSigner, tokenAddr, decimalsGuess, activePrice, normalizedNftAddress, refreshAllowance]);
 
+  /* ---------- Mint / Buy Secondary ---------- */
   const handleMint = useCallback(async () => {
-    if (minting || isSoldOut || mintStatus !== LISTED_STATUS || isOwner) return;
+    if (minting || isOwner) return;
+
+    // 再販中でも売切れではない（購入可）
+    const listed = mintStatus === LISTED_STATUS && Boolean((activePrice || "").trim());
+    if (!listed) {
+      alert("Not listed.");
+      return;
+    }
+
     if (!allowanceOK) {
       alert("先に Approve を完了してください。");
       return;
@@ -748,39 +634,39 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       if (!priceStr) throw new Error("Listing price is missing");
       const need = ethers.parseUnits(priceStr, d);
 
-      const ownerAddr = await signer.getAddress();
-      const bal: bigint = await erc20r.balanceOf(ownerAddr);
+      const buyerAddr = await signer.getAddress();
+      const bal: bigint = await erc20r.balanceOf(buyerAddr);
       if (bal < need) {
-        throw new Error(
-          `Insufficient PGirls token balance. Required: ${ethers.formatUnits(
-            need,
-            d
-          )}`
-        );
+        throw new Error(`Insufficient PGirls token balance. Required: ${ethers.formatUnits(need, d)}`);
       }
 
       const nft = new ethers.Contract(normalizedNftAddress, NFT_ABI_WRITE, signer);
 
-      // tokenURI（相対パスで API が解決する前提。必要に応じて絶対URLに変更）
-      const padded = tokenId.toString().padStart(3, "0");
-      const tokenURI = `/metadata/${langStr}/${padded}.json`;
-
       const run = async () => {
-        const data = NFT_WRITE_INTERFACE.encodeFunctionData("buy", [need, tokenURI]);
-        await provider.call({
-          to: normalizedNftAddress,
-          from: ownerAddr,
-          data,
-        });
-        const tx = await nft.buy(need, tokenURI, { gasLimit: 500_000 });
-        const receipt = await tx.wait();
-        setTxHash(receipt?.hash ?? tx.hash);
+        if (alreadyMinted) {
+          // ---------- 2次販売 ----------
+          const data = NFT_WRITE_INTERFACE.encodeFunctionData("buySecondary", [tokenId, need]);
+          await provider.call({ to: normalizedNftAddress, from: buyerAddr, data });
+          const tx = await nft.buySecondary(tokenId, need, { gasLimit: 500_000 });
+          const receipt = await tx.wait();
+          setTxHash(receipt?.hash ?? tx.hash);
+        } else {
+          // ---------- 1次販売 ----------
+          const padded = tokenId.toString().padStart(3, "0");
+          const tokenURI = `/metadata/${langStr}/${padded}.json`;
+
+          const data = NFT_WRITE_INTERFACE.encodeFunctionData("buy", [need, tokenURI]);
+          await provider.call({ to: normalizedNftAddress, from: buyerAddr, data });
+          const tx = await nft.buy(need, tokenURI, { gasLimit: 500_000 });
+          const receipt = await tx.wait();
+          setTxHash(receipt?.hash ?? tx.hash);
+        }
       };
 
       txMutexRef.current = run();
       await txMutexRef.current;
 
-      // 後処理（メタデータ側へも反映）
+      // 後処理（メタデータ側もリセット）
       try {
         const res = await fetch(`/api/updateListing`, {
           method: "POST",
@@ -790,7 +676,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
             fileName,
             mintStatus: DEFAULT_MINT_STATUS,
             price: "",
-            ownerAddress: ownerAddr,
+            ownerAddress: buyerAddr,
           }),
         });
         const payload = await res.json().catch(() => ({}));
@@ -807,11 +693,11 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       setMintStatus(DEFAULT_MINT_STATUS);
       setActivePrice("");
       setListPriceInput("");
-      await checkSoldOut();
+      await checkOnchainMintState();
 
       // 残高を更新
       try {
-        const raw = await erc20r.balanceOf(ownerAddr);
+        const raw = await erc20r.balanceOf(buyerAddr);
         setBalance(ethers.formatUnits(raw, d));
       } catch {}
     } catch (e: any) {
@@ -827,9 +713,9 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     }
   }, [
     minting,
-    isSoldOut,
-    mintStatus,
     isOwner,
+    mintStatus,
+    activePrice,
     allowanceOK,
     provider,
     normalizedNftAddress,
@@ -837,13 +723,13 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     requireSigner,
     tokenAddr,
     decimalsGuess,
-    activePrice,
-    langStr,
+    alreadyMinted,
     tokenId,
+    langStr,
     category,
     fileName,
     getOwnerFromMetadata,
-    checkSoldOut,
+    checkOnchainMintState,
   ]);
 
   /* ---------- リスティング更新（オーナーのみ） ---------- */
@@ -861,8 +747,9 @@ export default function PaymentNFT(props: PaymentNFTProps) {
 
   const shouldShowListingControls = useMemo(() => {
     if (canList) return true;
-    return !isSoldOut;
-  }, [canList, isSoldOut]);
+    // 非オーナーには表示しないが、表示条件は必要に応じて変更可
+    return false;
+  }, [canList]);
 
   const disableListingButton = useMemo(() => {
     if (updatingListing || !canList) return true;
@@ -897,8 +784,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         throw new Error(payload?.error || "Failed to update listing");
       }
       const metadata = (payload as any)?.metadata ?? {};
-      const rawStatus =
-        typeof metadata.mintStatus === "string" ? metadata.mintStatus : undefined;
+      const rawStatus = typeof metadata.mintStatus === "string" ? metadata.mintStatus : undefined;
       const rawPrice =
         typeof metadata.price === "string"
           ? metadata.price
@@ -906,24 +792,25 @@ export default function PaymentNFT(props: PaymentNFTProps) {
           ? String(metadata.price)
           : undefined;
 
-      const nextStatus =
-        rawStatus ?? (willList ? LISTED_STATUS : DEFAULT_MINT_STATUS);
+      const nextStatus = rawStatus ?? (willList ? LISTED_STATUS : DEFAULT_MINT_STATUS);
       const nextPrice = rawPrice ?? (willList ? trimmed : "");
       const nextOwner = getOwnerFromMetadata(metadata);
 
       setMintStatus(nextStatus);
       setActivePrice(nextPrice);
       setListPriceInput(nextPrice);
-      if (willList) setIsSoldOut(false);
+
+      // 再販であっても「リスト中」は売切れ扱いにしない
+      setIsSoldOut(alreadyMinted && !willList);
+
       if (nextOwner) setCurrentOwnerAddress(nextOwner);
-      if (!willList) setIsSoldOut(false);
     } catch (e: any) {
       console.error(e);
       alert(e?.message || "Failed to update listing");
     } finally {
       setUpdatingListing(false);
     }
-  }, [canList, listPriceInput, mintStatus, category, fileName, getOwnerFromMetadata]);
+  }, [canList, listPriceInput, mintStatus, category, fileName, getOwnerFromMetadata, alreadyMinted]);
 
   /* ---------- ボタン状態/ラベル ---------- */
   const displayButtonLabel = useMemo(() => {
@@ -936,11 +823,11 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     if (tokenStatus === "resolving") return "Resolving Token";
     if (tokenStatus === "missing") return "Token Unavailable";
     if (isOwner) return "Owner Wallet";
-    if (isSoldOut) return "Sold Out";
-    if (mintStatus !== LISTED_STATUS) return "Not Listed";
-    if (!activePrice) return "No Price";
+    const listed = mintStatus === LISTED_STATUS && Boolean((activePrice || "").trim());
+    if (!listed) return alreadyMinted ? "Not Listed (Resale)" : "Not Listed";
     if (!allowanceOK) return "Approve Required";
-    return "Mint";
+    // 一次/二次を意識しない文言に統一
+    return "Buy";
   }, [
     minting,
     provider,
@@ -949,10 +836,10 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     contractStatus,
     tokenStatus,
     isOwner,
-    isSoldOut,
     mintStatus,
     activePrice,
     allowanceOK,
+    alreadyMinted,
   ]);
 
   const tokenMismatch =
@@ -961,6 +848,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     tokenAddr &&
     nftTokenAddr.toLowerCase() !== tokenAddr.toLowerCase();
 
+  const listedNow = mintStatus === LISTED_STATUS && Boolean((activePrice || "").trim());
   const isDisabled = useMemo(
     () =>
       minting ||
@@ -969,32 +857,15 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       !normalizedNftAddress ||
       contractStatus !== "ready" ||
       tokenStatus !== "resolved" ||
-      mintStatus !== LISTED_STATUS ||
-      !activePrice ||
-      isSoldOut ||
+      !listedNow ||
       isOwner ||
       !allowanceOK,
-    [
-      minting,
-      provider,
-      account,
-      normalizedNftAddress,
-      contractStatus,
-      tokenStatus,
-      mintStatus,
-      activePrice,
-      isSoldOut,
-      isOwner,
-      allowanceOK,
-    ]
+    [minting, provider, account, normalizedNftAddress, contractStatus, tokenStatus, listedNow, isOwner, allowanceOK]
   );
 
   /* ---------- Render ---------- */
   const formattedTokenId = useMemo(() => tokenId.toString(), [tokenId]);
-  const displayNftAddress = useMemo(
-    () => normalizedNftAddress || "-",
-    [normalizedNftAddress]
-  );
+  const displayNftAddress = useMemo(() => normalizedNftAddress || "-", [normalizedNftAddress]);
 
   return (
     <div
@@ -1028,7 +899,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         </p>
       ) : (
         <p style={{ fontSize: "0.8rem", color: "#888" }}>
-          Connect the owner wallet to manage the listing.
+          {alreadyMinted ? "This token is already minted. If listed, you can buy it." : "Connect the owner wallet to manage the listing."}
         </p>
       )}
 
@@ -1040,31 +911,22 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       {normalizedNftAddress && hasReadProvider && contractStatus === "checking" && (
         <p style={{ fontSize: "0.8rem", color: "#8ecbff" }}>Checking NFT contract...</p>
       )}
-      {chainOk &&
-        normalizedNftAddress &&
-        hasReadProvider &&
-        contractStatus === "missing" && (
-          <p style={{ fontSize: "0.8rem", color: "#ff8080" }}>
-            Could not detect the specified NFT contract. Please check the network and
-            address.
-          </p>
-        )}
+      {chainOk && normalizedNftAddress && hasReadProvider && contractStatus === "missing" && (
+        <p style={{ fontSize: "0.8rem", color: "#ff8080" }}>
+          Could not detect the specified NFT contract. Please check the network and address.
+        </p>
+      )}
 
       {tokenStatus === "resolving" && (
-        <p style={{ fontSize: "0.8rem", color: "#8ecbff" }}>
-          Resolving PGirls token contract...
-        </p>
+        <p style={{ fontSize: "0.8rem", color: "#8ecbff" }}>Resolving PGirls token contract...</p>
       )}
       {chainOk && tokenStatus === "missing" && (
         <p style={{ fontSize: "0.8rem", color: "#ff8080" }}>
-          Unable to determine the PGirls token contract. Please refresh after verifying
-          the metadata.
+          Unable to determine the PGirls token contract. Please refresh after verifying the metadata.
         </p>
       )}
-      {!allowanceOK && tokenStatus === "resolved" && !isOwner && (
-        <p style={{ fontSize: "0.8rem", color: "#ffcf80" }}>
-          Approval is required before minting.
-        </p>
+      {!allowanceOK && tokenStatus === "resolved" && !isOwner && listedNow && (
+        <p style={{ fontSize: "0.8rem", color: "#ffcf80" }}>Approval is required before purchase.</p>
       )}
 
       <p style={{ fontSize: "0.8rem", color: "#ccc", wordBreak: "break-all" }}>
@@ -1072,7 +934,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       </p>
       <p style={{ fontSize: "0.8rem", color: "#ccc" }}>Token ID: {formattedTokenId}</p>
 
-      {/* List/Update controls (owner only, もしくは未売切れ時に表示) */}
+      {/* List/Update controls (owner only) */}
       {shouldShowListingControls && (
         <div
           style={{
@@ -1119,47 +981,22 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         </div>
       )}
 
-      {/* Approve ボタン（必要な時だけ） */}
-      {mintStatus === LISTED_STATUS &&
-        !isOwner &&
-        !isSoldOut &&
-        activePrice &&
-        tokenStatus === "resolved" && (
-          <div
-            style={{
-              marginTop: "0.75rem",
-              display: "flex",
-              gap: 8,
-              justifyContent: "center",
-              alignItems: "center",
-            }}
-          >
-            {!allowanceOK ? (
-              <button
-                onClick={handleApprove}
-                disabled={
-                  approving ||
-                  !provider ||
-                  !account ||
-                  contractStatus !== "ready" ||
-                  tokenStatus !== "resolved"
-                }
-                style={{
-                  padding: "0.6rem 1.2rem",
-                  backgroundColor: approving ? "#444" : "#28a745",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: 8,
-                  cursor: approving ? "not-allowed" : "pointer",
-                }}
-              >
-                {approving ? "Approving..." : "Approve PGirls"}
-              </button>
-            ) : (
-              <div style={{ fontSize: 12, color: "#8ecbff" }}>Allowance is ready</div>
-            )}
-          </div>
-        )}
+      {/* Approve ボタン */}
+      {listedNow && !isOwner && tokenStatus === "resolved" && (
+        <div style={{ marginTop: "0.75rem", display: "flex", gap: 8, justifyContent: "center", alignItems: "center" }}>
+          {!allowanceOK ? (
+            <button
+              onClick={handleApprove}
+              disabled={approving || !provider || !account || contractStatus !== "ready" || tokenStatus !== "resolved"}
+              style={{ padding: "0.6rem 1.2rem", backgroundColor: approving ? "#444" : "#28a745", color: "#fff", border: "none", borderRadius: 8, cursor: approving ? "not-allowed" : "pointer" }}
+            >
+              {approving ? "Approving..." : "Approve PGirls"}
+            </button>
+          ) : (
+            <div style={{ fontSize: 12, color: "#8ecbff" }}>Allowance is ready</div>
+          )}
+        </div>
+      )}
 
       {tokenMismatch && (
         <p style={{ fontSize: "0.8rem", color: "#ff8080", marginTop: "0.5rem" }}>
@@ -1168,7 +1005,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
         </p>
       )}
 
-      {/* Mint ボタン */}
+      {/* Buy/Mint ボタン */}
       <button
         onClick={handleMint}
         disabled={isDisabled}
@@ -1186,14 +1023,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       </button>
 
       {txHash && (
-        <p
-          style={{
-            marginTop: "0.5rem",
-            fontSize: "0.85em",
-            color: "lightgreen",
-            wordBreak: "break-all",
-          }}
-        >
+        <p style={{ marginTop: "0.5rem", fontSize: "0.85em", color: "lightgreen", wordBreak: "break-all" }}>
           Tx Hash:{" "}
           <a href={`${explorerBase}/tx/${txHash}`} target="_blank" rel="noreferrer">
             {txHash}
@@ -1208,4 +1038,3 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     </div>
   );
 }
-
