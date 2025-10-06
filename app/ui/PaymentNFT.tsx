@@ -274,6 +274,16 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   const primaryReadProvider = readProviders[0] ?? null;
   const hasReadProvider = readProviders.length > 0;
 
+  const fetchOnchainOwner = useCallback(async () => {
+    if (!primaryReadProvider || !normalizedNftAddress || !tokenId) return "";
+    try {
+      const nftRO = new ethers.Contract(normalizedNftAddress, NFT_ABI_MIN, primaryReadProvider);
+      return await nftRO.ownerOf(tokenId);
+    } catch {
+      return "";
+    }
+  }, [primaryReadProvider, normalizedNftAddress, tokenId]);
+
   /* ---------- コントラクト / token 解決 ---------- */
   useEffect(() => {
     let cancelled = false;
@@ -297,6 +307,13 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   useEffect(() => {
     setCurrentOwnerAddress(ownerAddress?.trim() ?? "");
   }, [ownerAddress]);
+
+  useEffect(() => {
+    (async () => {
+      const oc = await fetchOnchainOwner();
+      if (oc) setCurrentOwnerAddress(ethers.getAddress(oc));
+    })();
+  }, [fetchOnchainOwner]);
 
   useEffect(() => {
     setMintStatus(initialMintStatus || DEFAULT_MINT_STATUS);
@@ -623,6 +640,12 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       if (contractStatus !== "ready") throw new Error("NFT contract not deployed.");
 
       const signer = await requireSigner();
+      const buyer = await signer.getAddress();
+      const onchainOwner = await fetchOnchainOwner();
+      if (onchainOwner && onchainOwner.toLowerCase() === buyer.toLowerCase()) {
+        alert("You already own this token.");
+        return;
+      }
 
       const erc20r = new ethers.Contract(tokenAddr, ERC20_ABI_MIN, provider);
       let d = decimalsGuess;
@@ -634,7 +657,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       if (!priceStr) throw new Error("Listing price is missing");
       const need = ethers.parseUnits(priceStr, d);
 
-      const buyerAddr = await signer.getAddress();
+      const buyerAddr = buyer;
       const bal: bigint = await erc20r.balanceOf(buyerAddr);
       if (bal < need) {
         throw new Error(`Insufficient PGirls token balance. Required: ${ethers.formatUnits(need, d)}`);
@@ -721,6 +744,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     normalizedNftAddress,
     contractStatus,
     requireSigner,
+    fetchOnchainOwner,
     tokenAddr,
     decimalsGuess,
     alreadyMinted,
