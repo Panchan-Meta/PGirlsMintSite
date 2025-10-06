@@ -15,11 +15,13 @@ type MetadataRecord = Record<string, unknown>;
 declare global {
   interface Window {
     gtag?: (...args: any[]) => void;
-    dataLayer?: Array<Record<string, unknown>> & {
-      push?: (...args: any[]) => void;
-    };
+    dataLayer?: unknown;
   }
 }
+
+type DataLayerWithPush = {
+  push: (...args: any[]) => unknown;
+};
 
 const DEFAULT_NFT_CONTRACT = "0x704Bf56A89c745e6A62C70803816E83b009d2211";
 const DEFAULT_ERC20_CONTRACT = "0x654f25F2a36997C397Aad8a66D5a8783b6E61b9b";
@@ -720,9 +722,16 @@ export default function RahabMintSite() {
       return;
     }
 
-    const push = Array.isArray(window.dataLayer)
-      ? window.dataLayer.push.bind(window.dataLayer)
-      : window.dataLayer?.push;
+    const dataLayer = window.dataLayer;
+    const push =
+      Array.isArray(dataLayer) && typeof dataLayer.push === "function"
+        ? dataLayer.push.bind(dataLayer)
+        : typeof dataLayer === "object" &&
+          dataLayer !== null &&
+          "push" in dataLayer &&
+          typeof (dataLayer as DataLayerWithPush).push === "function"
+        ? (dataLayer as DataLayerWithPush).push.bind(dataLayer)
+        : undefined;
 
     if (typeof push === "function") {
       push({
