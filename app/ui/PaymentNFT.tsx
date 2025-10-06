@@ -182,6 +182,8 @@ const NFT_ABI_WRITE = [
   "function buy(uint256 price, string tokenURI) external",
 ] as const;
 
+const NFT_WRITE_INTERFACE = new ethers.Interface(NFT_ABI_WRITE);
+
 const ERC20_ABI_MIN = [
   "function decimals() view returns (uint8)",
   "function balanceOf(address) view returns (uint256)",
@@ -289,6 +291,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   const [tokenStatus, setTokenStatus] = useState<
     "unknown" | "resolving" | "resolved" | "missing"
   >("unknown");
+  const [nftTokenAddr, setNftTokenAddr] = useState<string>("");
   const watchAssetAttemptedRef = useRef(false);
 
   /* ---------- 各種ユーティリティ ---------- */
@@ -313,6 +316,29 @@ export default function PaymentNFT(props: PaymentNFTProps) {
 
   const primaryReadProvider = readProviders[0] ?? null;
   const hasReadProvider = readProviders.length > 0;
+
+  useEffect(() => {
+    let cancelled = false;
+    setNftTokenAddr("");
+    (async () => {
+      try {
+        if (!primaryReadProvider || !normalizedNftAddress) return;
+        const nftRO = new ethers.Contract(
+          normalizedNftAddress,
+          NFT_ABI_MIN,
+          primaryReadProvider
+        );
+        const a = await nftRO.pgirlsToken().catch(() => "");
+        if (!a || cancelled) return;
+        setNftTokenAddr(ethers.getAddress(a));
+      } catch (err) {
+        console.warn("Failed to fetch pgirlsToken", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [primaryReadProvider, normalizedNftAddress]);
 
   useEffect(() => {
     setCurrentOwnerAddress(ownerAddress?.trim() ?? "");
@@ -739,7 +765,13 @@ export default function PaymentNFT(props: PaymentNFTProps) {
       const tokenURI = `/metadata/${langStr}/${padded}.json`;
 
       const run = async () => {
-        const tx = await nft.buy(need, tokenURI);
+        const data = NFT_WRITE_INTERFACE.encodeFunctionData("buy", [need, tokenURI]);
+        await provider.call({
+          to: normalizedNftAddress,
+          from: ownerAddr,
+          data,
+        });
+        const tx = await nft.buy(need, tokenURI, { gasLimit: 500_000 });
         const receipt = await tx.wait();
         setTxHash(receipt?.hash ?? tx.hash);
       };
@@ -921,6 +953,12 @@ export default function PaymentNFT(props: PaymentNFTProps) {
     activePrice,
     allowanceOK,
   ]);
+
+  const tokenMismatch =
+    tokenStatus === "resolved" &&
+    nftTokenAddr &&
+    tokenAddr &&
+    nftTokenAddr.toLowerCase() !== tokenAddr.toLowerCase();
 
   const isDisabled = useMemo(
     () =>
@@ -1121,6 +1159,13 @@ export default function PaymentNFT(props: PaymentNFTProps) {
             )}
           </div>
         )}
+
+      {tokenMismatch && (
+        <p style={{ fontSize: "0.8rem", color: "#ff8080", marginTop: "0.5rem" }}>
+          NFT が参照する PGirls({nftTokenAddr}) と UI の PGirls({tokenAddr}) が一致していません。
+          コントラクト設定を更新してください。
+        </p>
+      )}
 
       {/* Mint ボタン */}
       <button
