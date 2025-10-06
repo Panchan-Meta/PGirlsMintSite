@@ -12,6 +12,15 @@ import PaymentNFT from "./ui/PaymentNFT";
 
 type MetadataRecord = Record<string, unknown>;
 
+declare global {
+  interface Window {
+    gtag?: (...args: any[]) => void;
+    dataLayer?: Array<Record<string, unknown>> & {
+      push?: (...args: any[]) => void;
+    };
+  }
+}
+
 const DEFAULT_NFT_CONTRACT = "0x704Bf56A89c745e6A62C70803816E83b009d2211";
 const DEFAULT_ERC20_CONTRACT = "0x654f25F2a36997C397Aad8a66D5a8783b6E61b9b";
 
@@ -699,6 +708,32 @@ export default function RahabMintSite() {
     }
   };
 
+  const trackGetPGirlsClick = useCallback(() => {
+    if (typeof window === "undefined") return;
+
+    if (typeof window.gtag === "function") {
+      window.gtag("event", "click", {
+        event_category: "outbound",
+        event_label: "Get PGirls",
+        transport_type: "beacon",
+      });
+      return;
+    }
+
+    const push = Array.isArray(window.dataLayer)
+      ? window.dataLayer.push.bind(window.dataLayer)
+      : window.dataLayer?.push;
+
+    if (typeof push === "function") {
+      push({
+        event: "ga_event",
+        event_name: "get_pgirls_click",
+        event_category: "outbound",
+        event_label: "Get PGirls",
+      });
+    }
+  }, []);
+
   return (
     <main
       style={{
@@ -790,6 +825,7 @@ export default function RahabMintSite() {
             target="_blank"
             rel="noopener noreferrer"
             style={{ color: "#8ecbff", fontWeight: 700 }}
+            onClick={trackGetPGirlsClick}
           >
             Get PGirls
           </a>
