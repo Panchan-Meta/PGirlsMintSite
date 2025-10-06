@@ -53,6 +53,7 @@ async function silentlyWatchAsset(eth: any, tokenAddr?: string, decimals?: numbe
 export interface PaymentNFTProps {
   nftContractAddr: string;
   tokenId: bigint;
+  tokenIdLabel?: string;
 
   /** 明示アドレス（pgirlsToken() が読めない場合のフォールバック） */
   erc20Address?: string;
@@ -200,6 +201,7 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   const {
     nftContractAddr,
     tokenId,
+    tokenIdLabel,
     erc20Address,
     langStr,
     mediaUrl,
@@ -888,7 +890,16 @@ export default function PaymentNFT(props: PaymentNFTProps) {
   );
 
   /* ---------- Render ---------- */
-  const formattedTokenId = useMemo(() => tokenId.toString(), [tokenId]);
+  const formattedTokenId = useMemo(() => {
+    if (typeof tokenIdLabel === "string" && tokenIdLabel.trim()) {
+      return tokenIdLabel.trim();
+    }
+    try {
+      return tokenId.toString();
+    } catch {
+      return "";
+    }
+  }, [tokenIdLabel, tokenId]);
   const displayNftAddress = useMemo(() => normalizedNftAddress || "-", [normalizedNftAddress]);
 
   return (
