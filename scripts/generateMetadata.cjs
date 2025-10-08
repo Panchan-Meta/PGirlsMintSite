@@ -38,7 +38,6 @@ const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL || "http://localhost:
 const METADATA_BASE_URL = String(
   process.env.METADATA_BASE_URL || `${PUBLIC_BASE_URL}/metadata`
 ).replace(/\/+$/, "");
-const IMAGE_EXT       = (process.env.IMAGE_EXT || "png").replace(/^\./, ""); // 例: png/jpg/webp
 const PAD             = Number(process.env.PAD || 3);
 
 // 画面表示用の既定
@@ -139,6 +138,42 @@ const padLeft = (n, w) => (String(n).length >= w ? String(n) : "0".repeat(w - St
 const encPath = (rel) => rel.split("/").map(encodeURIComponent).join("/");
 
 const parseList = (s) => (s || "").split(/[,;\n]/).map(x=>x.trim()).filter(Boolean);
+
+const splitExts = (value) => {
+  if (value == null) return [];
+  if (Array.isArray(value)) return value.flatMap(splitExts);
+  return String(value)
+    .split(/[,;\s]+/)
+    .map((ext) => ext.trim())
+    .filter(Boolean);
+};
+
+const normalizeExt = (ext) => ext.replace(/^\./, "").toLowerCase();
+
+const parseExtList = (value, fallback) => {
+  const parsed = splitExts(value).map(normalizeExt).filter(Boolean);
+  if (parsed.length) return Array.from(new Set(parsed));
+  return Array.from(new Set(splitExts(fallback).map(normalizeExt).filter(Boolean)));
+};
+
+const IMAGE_EXTS = (() => {
+  const list = parseExtList(process.env.IMAGE_EXTS || process.env.IMAGE_EXT, "png");
+  return list.length ? list : ["png"];
+})();
+
+const VIDEO_EXTS = (() => {
+  const list = parseExtList(process.env.VIDEO_EXTS || process.env.VIDEO_EXT, "mp4");
+  return list.length ? list : ["mp4"];
+})();
+
+const mediaExtsFromEnv = parseExtList(process.env.MEDIA_EXTS, []);
+const MEDIA_EXTS = mediaExtsFromEnv.length
+  ? mediaExtsFromEnv
+  : Array.from(new Set([...IMAGE_EXTS, ...VIDEO_EXTS]));
+
+const IMAGE_EXT_SET = new Set(IMAGE_EXTS);
+const VIDEO_EXT_SET = new Set(VIDEO_EXTS);
+const MEDIA_EXT_SET = new Set(MEDIA_EXTS);
 const includeCollections = parseList(process.env.INCLUDE_COLLECTIONS);
 const excludeCollections = new Set(parseList(process.env.EXCLUDE_COLLECTIONS));
 
@@ -151,13 +186,15 @@ function listCollections() {
   return includeCollections.length ? dirs.filter(d=>includeCollections.includes(d)) : dirs;
 }
 
-function listImagesRecursive(dir, baseDir) {
+function listMediaRecursive(dir, baseDir) {
   const out = [];
   for (const ent of fs.readdirSync(dir, { withFileTypes:true })) {
     const abs = path.join(dir, ent.name);
     if (ent.isDirectory()) {
-      out.push(...listImagesRecursive(abs, baseDir));
-    } else if (ent.isFile() && new RegExp(`\\.${IMAGE_EXT}$`, "i").test(ent.name)) {
+      out.push(...listMediaRecursive(abs, baseDir));
+    } else if (ent.isFile()) {
+      const ext = path.extname(ent.name).replace(/^\./, "").toLowerCase();
+      if (!MEDIA_EXT_SET.has(ext)) continue;
       const rel = path.relative(baseDir, abs).replace(/\\/g,"/");
       out.push(rel);
     }
@@ -165,6 +202,14 @@ function listImagesRecursive(dir, baseDir) {
   out.sort((a,b)=>a.localeCompare(b, undefined, { numeric:true, sensitivity:"base" }));
   return out;
 }
+
+const classifyAsset = (relPath) => {
+  const ext = path.extname(relPath).replace(/^\./, "").toLowerCase();
+  const isVideo = VIDEO_EXT_SET.has(ext);
+  const isImage = !isVideo && (IMAGE_EXT_SET.size === 0 || IMAGE_EXT_SET.has(ext));
+  return { ext, isVideo, isImage };
+};
+
 const readJsonSafe = (p) => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return null; } };
 
 function listJsonRecursive(dir, baseDir) {
@@ -214,8 +259,8 @@ function collectionSalt(collectionName) {
 // ===== 1コレクション処理 =====
 async function genOneCollection(provider, collectionName, allRows) {
   const collectionDir = path.join(PUBLIC_DIR, collectionName);
-  const imgs = listImagesRecursive(collectionDir, collectionDir);
-  if (!imgs.length) { console.warn(`[warn] 画像が見つかりません (skip): ${collectionName}`); return; }
+  const mediaFiles = listMediaRecursive(collectionDir, collectionDir);
+  if (!mediaFiles.length) { console.warn(`[warn] メディアファイルが見つかりません (skip): ${collectionName}`); return; }
 
   const encodedCat = encodeURIComponent(collectionName);
   const collectionMetaDir = path.join(SITE_META_DIR, collectionName);
@@ -269,12 +314,12 @@ async function genOneCollection(provider, collectionName, allRows) {
 
   /** @type {Array<Record<string,string>>} */
   const rows = [];
-  console.log(`\n=== ${collectionName} (${imgs.length} images) ===`);
+  console.log(`\n=== ${collectionName} (${mediaFiles.length} assets) ===`);
 
   const existingMetaDir = path.join(SITE_META_DIR, collectionName);
   const existingJsonRels = listJsonRecursive(existingMetaDir, existingMetaDir);
   /** @type {Map<string,{data:Record<string,any>,jsonRel:string,abs:string}>} */
-  const existingMetaByImage = new Map();
+  const existingMetaByAsset = new Map();
   let highestTokenId = 0;
   for (const rel of existingJsonRels) {
     const abs = path.join(existingMetaDir, rel);
@@ -282,23 +327,31 @@ async function genOneCollection(provider, collectionName, allRows) {
     if (!data) continue;
     const tokenId = normaliseTokenId(data, rel);
     if (tokenId > highestTokenId) highestTokenId = tokenId;
+    const metaRecord = { data, jsonRel: rel, abs, tokenId };
     const imgUrl = typeof data.image === "string" ? data.image : undefined;
     if (imgUrl) {
-      existingMetaByImage.set(imgUrl, { data, jsonRel: rel, abs });
+      existingMetaByAsset.set(imgUrl, metaRecord);
+    }
+    const animationUrl = typeof data.animation_url === "string" ? data.animation_url : undefined;
+    if (animationUrl) {
+      existingMetaByAsset.set(animationUrl, metaRecord);
     }
   }
 
   let tokenCounter = highestTokenId;
 
-  for (const imageRel of imgs) {
-    const subdir   = path.dirname(imageRel).replace(/^\.$/, "");
-    const imageUrl = `${PUBLIC_BASE_URL}/assets/${encodedCat}/${encPath(imageRel)}`;
-    const existing = existingMetaByImage.get(imageUrl);
+  for (const assetRel of mediaFiles) {
+    const subdir    = path.dirname(assetRel).replace(/^\.$/, "");
+    const assetUrl  = `${PUBLIC_BASE_URL}/assets/${encodedCat}/${encPath(assetRel)}`;
+    const { isVideo: isVideoAsset } = classifyAsset(assetRel);
+    const existing = existingMetaByAsset.get(assetUrl);
 
     if (existing) {
       const defaults = baseDefaultsFor(collectionName);
       const finalMeta = existing.data || {};
-      const tokenId = normaliseTokenId(finalMeta, existing.jsonRel) || existingMetaByImage.size;
+      const tokenId = normaliseTokenId(finalMeta, existing.jsonRel)
+        || (typeof existing.tokenId === "number" && existing.tokenId > 0 ? existing.tokenId : 0)
+        || existingMetaByAsset.size;
       if (tokenId > tokenCounter) tokenCounter = tokenId;
       const baseNum = padLeft(tokenId, PAD);
       const jsonRel = existing.jsonRel;
@@ -317,13 +370,18 @@ async function genOneCollection(provider, collectionName, allRows) {
                 ? finalMeta.soldout
                 : finalMeta.soldout ?? defaults.soldout
             );
+      const finalImage = typeof finalMeta.image === "string" ? finalMeta.image : "";
+      const finalAnimation = typeof finalMeta.animation_url === "string" ? finalMeta.animation_url : "";
+      const rowImage = finalImage || (!finalAnimation && !isVideoAsset ? assetUrl : "");
+      const rowAnimation = finalAnimation || (isVideoAsset ? assetUrl : "");
       const row = {
         collection: collectionName,
         index: String(tokenId),
         number_padded: baseNum,
         name: finalMeta.name || `${NAME_PREFIX}${tokenId}`,
         tokenURI,
-        image: finalMeta.image || imageUrl,
+        image: rowImage,
+        animation_url: rowAnimation,
         contractAddress: finalMeta.contractAddress || predictedCollection,
         fileName: finalMeta.fileName || jsonRel,
         price: String(finalPrice),
@@ -331,7 +389,7 @@ async function genOneCollection(provider, collectionName, allRows) {
         tokenId: String(tokenId),
       };
       rows.push(row);
-      console.log(`#${baseNum} (existing): ${predictedCollection}   ${imageRel}`);
+      console.log(`#${baseNum} (existing): ${predictedCollection}   ${assetRel}`);
       continue;
     }
 
@@ -350,7 +408,6 @@ async function genOneCollection(provider, collectionName, allRows) {
       const meta = {
         name,
         description: name,
-        image: imageUrl,
         external_url: PUBLIC_BASE_URL,
         attributes: [],
         tokenId: tokenCounter,
@@ -365,6 +422,14 @@ async function genOneCollection(provider, collectionName, allRows) {
         fileName: jsonRel,
         tokenURI,
       };
+      if (isVideoAsset) {
+        meta.animation_url = assetUrl;
+      } else {
+        meta.image = assetUrl;
+      }
+      if (!meta.image && !meta.animation_url) {
+        meta.image = assetUrl;
+      }
       fs.writeFileSync(jsonAbs, JSON.stringify(meta, null, 2), "utf8");
     }
 
@@ -376,7 +441,8 @@ async function genOneCollection(provider, collectionName, allRows) {
       number_padded: baseNum,
       name,
       tokenURI,
-      image: imageUrl,
+      image: isVideoAsset ? "" : assetUrl,
+      animation_url: isVideoAsset ? assetUrl : "",
       contractAddress: predictedCollection,
       fileName: jsonRel,
       price: String(priceForRow),
@@ -385,7 +451,7 @@ async function genOneCollection(provider, collectionName, allRows) {
     };
     rows.push(row);
 
-    console.log(`#${baseNum}: ${predictedCollection}   ${imageRel}`);
+    console.log(`#${baseNum}: ${predictedCollection}   ${assetRel}`);
   }
 
   // コレクション本体が未デプロイなら deploy 行を1回だけ追加
