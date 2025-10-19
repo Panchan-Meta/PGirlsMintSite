@@ -24,7 +24,6 @@ type DataLayerWithPush = {
 };
 
 const DEFAULT_NFT_CONTRACT = "0x704Bf56A89c745e6A62C70803816E83b009d2211";
-const DEFAULT_ERC20_CONTRACT = "0x4f37658cDFd8A91755A91428642d0094E4Ca97F0";
 
 // === Chain config from env ===
 const CHAIN_ID_HEX =
@@ -385,6 +384,8 @@ const DEFAULT_TOKEN_ADDRESS = normalizeAddress(
     process.env.NEXT_PUBLIC_PGIRLS_ERC20_ADDRESS ??
     "0x654f25F2a36997C397Aad8a66D5a8783b6E61b9b"
 );
+const DEFAULT_ERC20_CONTRACT = DEFAULT_TOKEN_ADDRESS ||
+  "0x4f37658cDFd8A91755A91428642d0094E4Ca97F0";
 
 export default function RahabMintSite() {
   const [categories, setCategories] = useState<string[]>([]);
