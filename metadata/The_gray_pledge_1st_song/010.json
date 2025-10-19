@@ -1,0 +1,18 @@
+{
+  "name": "SingleNFT #10",
+  "description": "SingleNFT #10",
+  "external_url": "https://mint.rahabpunkaholicgirls.com",
+  "attributes": [],
+  "tokenId": 10,
+  "contractAddress": "0x8516de40D6b447488b1BeA2BE199Ddf349092dbc",
+  "price": "8",
+  "soldout": false,
+  "mintStatus": "BeforeList",
+  "ownerAddress": "0xfF280ED2B0FF2Fb64E97137F82307042B4338C79",
+  "owner": "0xfF280ED2B0FF2Fb64E97137F82307042B4338C79",
+  "walletAddress": "0xfF280ED2B0FF2Fb64E97137F82307042B4338C79",
+  "category": "The_gray_pledge_1st_song",
+  "fileName": "010.json",
+  "tokenURI": "https://mint.rahabpunkaholicgirls.com/metadata/The_gray_pledge_1st_song/010.json",
+  "animation_url": "https://mint.rahabpunkaholicgirls.com/assets/The_gray_pledge_1st_song/010.mp4"
+}
