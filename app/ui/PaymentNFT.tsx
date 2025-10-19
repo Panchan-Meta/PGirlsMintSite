@@ -21,7 +21,10 @@ const getFallbackProvider = () => {
 };
 
 const WATCH_ASSET = {
-  address: String(process.env.NEXT_PUBLIC_PGIRLS_TOKEN_ADDRESS || ""),
+  address: String(
+    process.env.NEXT_PUBLIC_PGIRLS_TOKEN_ADDRESS ||
+      "0x0830793d69D43A245e34516E5108222c81396283"
+  ),
   symbol: String(process.env.NEXT_PUBLIC_PGIRLS_TOKEN_SYMBOL || "PGirls").slice(0, 11),
   decimals: Number(process.env.NEXT_PUBLIC_PGIRLS_TOKEN_DECIMALS || 18),
   image: String(process.env.NEXT_PUBLIC_PGIRLS_TOKEN_ICON || ""),
